@@ -1,0 +1,117 @@
+---
+title: "FinalProject_DataCleaning_v1"
+author: "Alexandre"
+date: "April/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+```
+
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+# Geo data
+
+## City names and codes
+
+Source: IBGE, https://www.ibge.gov.br/explica/codigos-dos-municipios.php
+
+```{r}
+names <- read.csv("data/IBGE/city_names_v1.csv", encoding = "UTF-8")
+str(names) 
+
+names <- names %>%
+  rename(city_code = X.U.FEFF.city_code) %>%
+  select(city_code, PT_city_UF)
+str(names)   
+```
+
+
+# Covid data
+
+## Deaths and cases
+
+Source: https://brasil.io/dataset/covid19/caso_full/
+
+
+```{r}
+covid <- read.csv("data/Brasil.io/caso_full.csv") #local path of database
+
+covid$date <- as.Date(covid$date, "%Y-%m-%d")
+str(covid) 
+```
+
+```{r find last day of complete data for all cities, warning=FALSE}
+
+last <- covid %>% 
+  filter(place_type == "city") %>%
+    filter(is_last == "True" ) %>%
+      group_by(city_ibge_code) %>%
+      summarise(last_day_available = date) 
+
+last_day <- min(last$last_day_available)
+```
+
+```{r calculate cumulate cases and deaths until last day of available date}
+
+db_covid_last <- covid %>% 
+ filter(place_type == "city") %>%
+  filter(city_ibge_code != "") %>% 
+    filter(date <= last_day) %>%
+       group_by(city_ibge_code) %>%
+       summarise(cases = sum(new_confirmed), deaths = sum(new_deaths)) %>%
+       arrange(city_ibge_code)
+
+#sum(is.na(db_covid_last)) #check if there is any missing cities
+
+db_covid_last %>%
+  write.csv("data_cleaned/Covid_LastNumbers.csv",row.names=FALSE)
+```
+
+## Dedicated ICU beds sponsored by the Federal Government
+
+Source: Localiza SUS, https://qsprod.saude.gov.br/extensions/DEMAS_C19Insumos_LEITOS_2021UTI/DEMAS_C19Insumos_LEITOS_2021UTI.html
+
+```{r}
+fed_covid_ICUbeds <- read.csv("data/Localiza_SUS/MS_Covid19_Leitos2021_19-04-21.csv", encoding = "UTF-8") #local path of database
+#str(fed_covid_ICUbeds)
+
+fed_covid_ICUbeds <- fed_covid_ICUbeds %>%
+  select(Município, UF, Ano, Autorizações.publicadas, Valor.autorizações) %>%
+  rename(PT_city = Município, Year = Ano, beds_authorized = Autorizações.publicadas, beds_authorized_cost = Valor.autorizações)
+str(fed_covid_ICUbeds)
+```
+
+```{r}
+db_fed_covid_ICUbeds <- fed_covid_ICUbeds %>%
+  filter(Year == 2021)%>%
+    mutate(city_UF = paste0(PT_city," (",UF,")")) %>%
+      group_by(city_UF)%>%
+      summarise(beds = sum(beds_authorized), beds_cost = sum(beds_authorized_cost))
+
+db_fed_covid_ICUbeds %>%
+  write.csv("data_cleaned/db_fed_covid_ICUbeds.csv",row.names=FALSE)
+
+
+full_join(db_fed_covid_ICUbeds, names, by = c("city_UF" = "PT_city_UF")) %>%
+  arrange(city_UF)
+
+# checar cidades com e sem acento
+```
+```
+
+## Government expenditure with COVID
+
+Source: https://qsprod.saude.gov.br/extensions/DEMAS_C19SIOPS/DEMAS_C19SIOPS.html
+

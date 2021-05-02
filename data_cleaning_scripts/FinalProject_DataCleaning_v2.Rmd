@@ -1,0 +1,288 @@
+---
+title: "FinalProject_DataCleaning_v1"
+author: "Alexandre"
+date: "April/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+```
+
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+# Geo data
+
+## City names and codes
+
+Source: IBGE, https://www.ibge.gov.br/explica/codigos-dos-municipios.php
+
+```{r}
+names <- read.csv("data/city_names_v1.csv", encoding = "UTF-8")
+str(names) 
+
+names <- names %>%
+  rename(city_code = X.U.FEFF.city_code) %>%
+  select(city_code, PT_city_UF)
+str(names)   
+```
+
+
+## Codes and names variations
+
+Variations of names, compiled from different data sources used, with corresponding IBGE code
+
+```{r}
+names_aux <- read.csv("data/COMPLETE_city_names_v1.csv", encoding = "UTF-8")
+str(names_aux) 
+
+names_aux <- names_aux %>%
+   rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+   select(city_code, PT_city_UF_aux)
+str(names_aux)   
+```
+
+```{r}
+names_aux2 <- read.csv("data/COMPLETE_city_names_v2.csv", encoding = "UTF-8")
+str(names_aux2) 
+
+names_aux2 <- names_aux2 %>%
+  distinct() %>%
+  rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+  select(city_code, PT_city_UF_aux)
+str(names_aux2)   
+```
+
+# Covid data
+
+## Deaths and cases
+
+Source: https://brasil.io/dataset/covid19/caso_full/
+
+
+```{r}
+covid <- read.csv("data/Brasil.io/caso_full.csv") #local path of database
+
+covid$date <- as.Date(covid$date, "%Y-%m-%d")
+str(covid) 
+```
+
+```{r find last day of complete data for all cities, warning=FALSE}
+
+last <- covid %>% 
+  filter(place_type == "city") %>%
+    filter(is_last == "True" ) %>%
+      group_by(city_ibge_code) %>%
+      summarise(last_day_available = date) 
+
+last_day <- min(last$last_day_available)
+```
+
+```{r calculate cumulate cases and deaths until last day of available date}
+
+db_covid_last <- covid %>% 
+ filter(place_type == "city") %>%
+  filter(city_ibge_code != "") %>% 
+    filter(date <= last_day) %>%
+       group_by(city_ibge_code) %>%
+       summarise(cases = sum(new_confirmed), deaths = sum(new_deaths)) %>%
+       arrange(city_ibge_code)
+
+sum(is.na(db_covid_last)) #check if there is any missing cities
+
+db_covid_last %>%
+  write.csv("data_cleaned/Covid_LastNumbers.csv",row.names=FALSE)
+```
+
+## Dedicated ICU beds sponsored by the Federal Government
+
+Source: Localiza SUS, https://qsprod.saude.gov.br/extensions/DEMAS_C19Insumos_LEITOS_2021UTI/DEMAS_C19Insumos_LEITOS_2021UTI.html
+
+```{r}
+fed_covid_ICUbeds <- read.csv("data/Localiza_SUS/MS_Covid19_Leitos2021_19-04-21.csv", encoding = "UTF-8") #local path of database
+#str(fed_covid_ICUbeds)
+
+fed_covid_ICUbeds <- fed_covid_ICUbeds %>%
+  select(Município, UF, Ano, Autorizações.publicadas, Valor.autorizações) %>%
+  rename(PT_city = Município, Year = Ano, beds_authorized = Autorizações.publicadas, beds_authorized_cost = Valor.autorizações)
+str(fed_covid_ICUbeds)
+```
+
+```{r}
+aux_fed_covid_ICUbeds <- fed_covid_ICUbeds %>%
+  filter(Year == 2021)%>%
+    mutate(city_UF = paste0(PT_city," (",UF,")")) %>%
+      group_by(city_UF)%>%
+      summarise(beds = sum(beds_authorized), beds_cost = sum(beds_authorized_cost))
+
+# aux_fed_covid_ICUbeds %>%
+#   write.csv("data_cleaned/aux_fed_covid_ICUbeds.csv",row.names=FALSE)
+
+# anti_join(aux_fed_covid_ICUbeds, names_aux, by = c("city_UF" = "PT_city_UF_aux"))
+
+db_fed_covid_ICUbeds <- full_join(aux_fed_covid_ICUbeds, names_aux, by = c("city_UF" = "PT_city_UF_aux")) %>%
+  group_by(city_code)%>%
+    summarise(beds = sum(beds), beds_cost = sum(beds_cost))
+
+sum(is.na(db_fed_covid_ICUbeds$city_code)) #check if there is any missing or in excess cities
+
+db_fed_covid_ICUbeds %>%
+  write.csv("data_cleaned/db_fed_covid_ICUbeds.csv",row.names=FALSE)
+
+```
+
+## Government expenditure with COVID
+
+Source: https://qsprod.saude.gov.br/extensions/DEMAS_C19SIOPS/DEMAS_C19SIOPS.html
+
+```{r}
+covid_spent <- read.csv("data/Localiza_SUS/MS_Covid19_Recursos_v2.csv", encoding = "UTF-8") #local path of database
+#str(fed_covid_spent)
+
+covid_spent <- covid_spent %>%
+  mutate(city_UF = paste0(Município," (",UF,")")) %>%
+  select(city_UF, Origem, Ano, Período, Valor.Empenhado..R...1, Valor.Pago..R...1) %>%
+  rename(year = Ano, source = Origem, period = Período, 
+         amount_committed = Valor.Empenhado..R...1, amount_disbursed = Valor.Pago..R...1)
+str(covid_spent)
+```
+```{r}
+aux_covid_spent <- covid_spent %>%
+  filter(year == "2020") %>%
+  group_by(city_UF, source, period) %>%
+  summarise(amount_committed=sum(amount_committed), amount_disbursed=sum(amount_disbursed)) %>%
+    pivot_wider(names_from = period, values_from = c(amount_committed, amount_disbursed)) %>%
+      rename(exp_committed_p2 = "amount_committed_2º Bimestre",
+             exp_committed_p3 = "amount_committed_3º Bimestre",
+             exp_committed_p4 = "amount_committed_4º Bimestre",
+             exp_committed_p5 = "amount_committed_5º Bimestre",
+             exp_committed_p6 = "amount_committed_6º Bimestre",
+             exp_disbursed_p2 = "amount_disbursed_2º Bimestre",
+             exp_disbursed_p3 = "amount_disbursed_3º Bimestre",
+             exp_disbursed_p4 = "amount_disbursed_4º Bimestre",
+             exp_disbursed_p5 = "amount_disbursed_5º Bimestre",
+             exp_disbursed_p6 = "amount_disbursed_6º Bimestre") %>%
+      pivot_wider(names_from = source, 
+                  values_from = c(exp_committed_p2, exp_committed_p3, exp_committed_p4, exp_committed_p5, exp_committed_p6,
+                                  exp_disbursed_p2, exp_disbursed_p3, exp_disbursed_p4, exp_disbursed_p5, exp_disbursed_p6)) %>%
+        rename(exp_committed_p2_city = "exp_committed_p2_Recurso Próprio",
+               exp_committed_p3_city = "exp_committed_p3_Recurso Próprio",
+               exp_committed_p4_city = "exp_committed_p4_Recurso Próprio",
+               exp_committed_p5_city = "exp_committed_p5_Recurso Próprio",
+               exp_committed_p6_city = "exp_committed_p6_Recurso Próprio",
+               exp_disbursed_p2_city = "exp_disbursed_p2_Recurso Próprio",
+               exp_disbursed_p3_city = "exp_disbursed_p3_Recurso Próprio",
+               exp_disbursed_p4_city = "exp_disbursed_p4_Recurso Próprio",
+               exp_disbursed_p5_city = "exp_disbursed_p5_Recurso Próprio",
+               exp_disbursed_p6_city = "exp_disbursed_p6_Recurso Próprio",
+               exp_committed_p2_state = "exp_committed_p2_Repasse Estadual",
+               exp_committed_p3_state = "exp_committed_p3_Repasse Estadual",
+               exp_committed_p4_state = "exp_committed_p4_Repasse Estadual",
+               exp_committed_p5_state = "exp_committed_p5_Repasse Estadual",
+               exp_committed_p6_state = "exp_committed_p6_Repasse Estadual",
+               exp_disbursed_p2_state = "exp_disbursed_p2_Repasse Estadual",
+               exp_disbursed_p3_state = "exp_disbursed_p3_Repasse Estadual",
+               exp_disbursed_p4_state = "exp_disbursed_p4_Repasse Estadual",
+               exp_disbursed_p5_state = "exp_disbursed_p5_Repasse Estadual",
+               exp_disbursed_p6_state = "exp_disbursed_p6_Repasse Estadual",
+               exp_committed_p2_fed = "exp_committed_p2_Repasse Federal",
+               exp_committed_p3_fed = "exp_committed_p3_Repasse Federal",
+               exp_committed_p4_fed = "exp_committed_p4_Repasse Federal",
+               exp_committed_p5_fed = "exp_committed_p5_Repasse Federal",
+               exp_committed_p6_fed = "exp_committed_p6_Repasse Federal",
+               exp_disbursed_p2_fed = "exp_disbursed_p2_Repasse Federal",
+               exp_disbursed_p3_fed = "exp_disbursed_p3_Repasse Federal",
+               exp_disbursed_p4_fed = "exp_disbursed_p4_Repasse Federal",
+               exp_disbursed_p5_fed = "exp_disbursed_p5_Repasse Federal",
+               exp_disbursed_p6_fed = "exp_disbursed_p6_Repasse Federal")
+# names(aux_covid_spent)
+
+# match city with codes
+
+aux2_covid_spent <- right_join(aux_covid_spent, names_aux2, by = c("city_UF" = "PT_city_UF_aux")) %>%
+  group_by(city_code) %>%
+   summarise(exp_committed_p2_city = sum(exp_committed_p2_city),
+             exp_committed_p3_city = sum(exp_committed_p3_city),
+             exp_committed_p4_city = sum(exp_committed_p4_city),
+             exp_committed_p5_city = sum(exp_committed_p5_city),
+             exp_committed_p6_city = sum(exp_committed_p6_city),
+             exp_disbursed_p2_city = sum(exp_disbursed_p2_city),
+             exp_disbursed_p3_city = sum(exp_disbursed_p3_city),
+             exp_disbursed_p4_city = sum(exp_disbursed_p4_city),
+             exp_disbursed_p5_city = sum(exp_disbursed_p5_city),
+             exp_disbursed_p6_city = sum(exp_disbursed_p6_city),
+             exp_committed_p2_state = sum(exp_committed_p2_state),
+             exp_committed_p3_state = sum(exp_committed_p3_state),
+             exp_committed_p4_state = sum(exp_committed_p4_state),
+             exp_committed_p5_state = sum(exp_committed_p5_state),
+             exp_committed_p6_state = sum(exp_committed_p6_state),
+             exp_disbursed_p2_state = sum(exp_disbursed_p2_state),
+             exp_disbursed_p3_state = sum(exp_disbursed_p3_state),
+             exp_disbursed_p4_state = sum(exp_disbursed_p4_state),
+             exp_disbursed_p5_state = sum(exp_disbursed_p5_state),
+             exp_disbursed_p6_state = sum(exp_disbursed_p6_state),
+             exp_committed_p2_fed = sum(exp_committed_p2_fed),
+             exp_committed_p3_fed = sum(exp_committed_p3_fed),
+             exp_committed_p4_fed = sum(exp_committed_p4_fed),
+             exp_committed_p5_fed = sum(exp_committed_p5_fed),
+             exp_committed_p6_fed = sum(exp_committed_p6_fed),
+             exp_disbursed_p2_fed = sum(exp_disbursed_p2_fed),
+             exp_disbursed_p3_fed = sum(exp_disbursed_p3_fed),
+             exp_disbursed_p4_fed = sum(exp_disbursed_p4_fed),
+             exp_disbursed_p5_fed = sum(exp_disbursed_p5_fed),
+             exp_disbursed_p6_fed = sum(exp_disbursed_p6_fed))
+
+sum(is.na(aux2_covid_spent$city_code)) #check if there is any missing cities
+
+db_covid_spent <- aux2_covid_spent %>%
+  filter(city_code != "")
+
+db_covid_spent %>%
+  write.csv("data_cleaned/db_covid_spent.csv",row.names=FALSE)
+
+```
+          
+## Vaccines
+
+Source: https://qsprod.saude.gov.br/extensions/DEMAS_C19Vacina/DEMAS_C19Vacina.html
+
+
+```{r}
+vaccines <- read.csv("data/Localiza_SUS/Vacinas aplicadas_19-04-21.csv", encoding = "UTF-8") #local path of database
+str(vaccines)
+
+vaccines  <- vaccines %>%
+  rename(city = X.U.FEFF..U.FEFF.Município) %>%
+  mutate(city_UF = paste0(city," (",UF,")")) %>%
+  select(city, UF, city_UF, Fabricante, Doses.Aplicadas, Dose.1, Dose.2) %>%
+  rename(vac_provider = Fabricante, vac_shots = Doses.Aplicadas, vac_dose1 = Dose.1, vac_dose2 = Dose.2) %>%
+  mutate(vac_provider = ifelse(vac_provider == "Vacina Adsorvida Covid-19 (Inativada) - Coronavac", "Coronavac", 
+                                   ifelse(vac_provider == "Vacina Covid-19 - Covishield", "Covishield (AZ)", "Unknown")))
+str(vaccines)
+```
+
+```{r}
+vaccines %>%
+  filter(UF != "-" & city != "-") %>%
+    select(city_UF, vac_provider, vac_shots, vac_dose1, vac_dose2) %>%
+        group_by(city_UF, vac_provider) %>%
+        summarise(vac_shots = sum(vac_shots), vac_dose1 = sum(vac_dose1), vac_dose2 = sum(vac_dose2)) %>%
+          pivot_wider(names_from = vac_provider, values_from = c(vac_shots, vac_dose1, vac_dose2)) %>%
+            right_join(names, by = c("city_UF" = "PT_city_UF")) %>%
+              select(- city_UF)
+  
+  
+```
+
+
+[end]

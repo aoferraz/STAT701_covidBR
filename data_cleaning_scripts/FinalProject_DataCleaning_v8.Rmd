@@ -1,0 +1,2407 @@
+---
+title: "FinalProject_DataCleaning_v1"
+author: "Alexandre"
+date: "April/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+```
+
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+# Geo data
+
+## City names and codes
+
+Source: IBGE, https://www.ibge.gov.br/explica/codigos-dos-municipios.php
+
+```{r}
+names <- read.csv("data/city_names_v1.csv", encoding = "UTF-8")
+str(names) 
+
+names <- names %>%
+  rename(city_code = X.U.FEFF.city_code) %>%
+  select(city_code, PT_city_UF)
+str(names)   
+```
+  
+Variations of city names, compiled from different data sources used, with corresponding IBGE code
+
+```{r}
+names_aux <- read.csv("data/COMPLETE_city_names_v1.csv", encoding = "UTF-8")
+str(names_aux) 
+
+names_aux <- names_aux %>%
+   rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+   select(city_code, PT_city_UF_aux)
+str(names_aux)   
+```
+
+```{r}
+names_aux2 <- read.csv("data/COMPLETE_city_names_v2.csv", encoding = "UTF-8")
+str(names_aux2) 
+
+names_aux2 <- names_aux2 %>%
+  distinct() %>%
+  rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+  select(city_code, PT_city_UF_aux)
+str(names_aux2)   
+```
+
+```{r}
+names_aux3 <- read.csv("data/COMPLETE_city_names_v3.csv", encoding = "UTF-8")
+str(names_aux3) 
+
+names_aux3 <- names_aux3 %>%
+  distinct() %>%
+  rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+  select(city_code, PT_city_UF_aux)
+str(names_aux3)   
+```
+
+```{r}
+names_aux4 <- read.csv("data/COMPLETE_city_names_v4.csv", encoding = "UTF-8")
+str(names_aux4) 
+
+names_aux4 <- names_aux4 %>%
+  distinct() %>%
+  rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+  select(city_code, PT_city_UF_aux)
+str(names_aux4)   
+```
+```{r}
+names_aux5 <- read.csv("data/COMPLETE_city_names_v5.csv", encoding = "UTF-8")
+str(names_aux5) 
+
+names_aux5 <- names_aux5 %>%
+  distinct() %>%
+  rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+  select(city_code, PT_city_UF_aux)
+str(names_aux5)   
+```
+
+```{r}
+names_aux6 <- read.csv("data/COMPLETE_city_names_v6.csv", encoding = "UTF-8")
+str(names_aux6) 
+
+names_aux6 <- names_aux6 %>%
+  distinct() %>%
+  rename(PT_city_UF_aux = X.U.FEFF.PT_city_UF_aux) %>%
+  select(city_code, PT_city_UF_aux)
+str(names_aux6)
+```
+
+```{r}
+names_aux7 <- names_aux6 %>%
+  mutate(city_code6 = as.numeric(substr(city_code, 1,6)))
+#str(names_aux7)
+
+names_aux7 <- names_aux7[,c(1,3)] %>%
+  distinct()
+str(names_aux7)
+
+```
+
+```{r}
+# Used version in the script 
+names_code7.final <- names_aux6
+str(names_code7.final)
+
+names_code6.final <- names_aux7 
+str(names_code6.final)
+
+```
+
+## City area
+
+Source: IBGE, table 1301, https://sidra.ibge.gov.br/tabela/1301
+
+```{r}
+# Total city area
+area <- read_xlsx("data/IBGE/tabela1301_area_densidade.xlsx", sheet = 1) #local path of database
+#str(area)
+a <- dim(area)
+
+area <- area[-c(1,2,3,4,a[1]),]
+ 
+area <- area %>%
+  rename(city_UF = "Tabela 1301 - Área e Densidade demográfica da unidade territorial",
+         city.area = ...2)
+#str(area)
+
+area[ area == "-" ] <- "0"
+#str(area)
+
+area <- bind_cols(area[,1], lapply(area[,2], as.numeric))
+#str(area)
+
+# Match city codes
+area <- area %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+area <- area[,c(3,2)]
+str(area)
+
+# Save cleaned data
+area %>%
+  write.csv("data_cleaned/db_geo_area.csv",row.names=FALSE)
+
+```
+
+## Urban area
+
+Source: Geoinfo (2015), http://geoinfo.cnpm.embrapa.br/layers/geonode%3Aareas_urbanas_br_15
+
+```{r}
+# Urban area
+area_urban <- read_xls("data/Geoinfo/areas_urbanas_br_2015.xls", sheet = 1) #local path of database
+#str(area_urban)
+a <- dim(area_urban)
+
+area_urban <- area_urban %>%
+  rename(city_code = Geocodigo, area.urban = Area_Urb)
+
+area_urban <- area_urban[,c(6,5)]
+str(area_urban)
+
+#anti_join(names, area_urban, by = "city_code")
+
+# Save cleaned data
+area_urban %>%
+  write.csv("data_cleaned/db_geo_area_urban.csv",row.names=FALSE)
+```
+
+## Metropolitan area classification
+
+Source: IBGE (2020), https://www.ibge.gov.br/geociencias/organizacao-do-territorio/divisao-regional/18354-regioes-metropolitanas-aglomeracoes-urbanas-e-regioes-integradas-de-desenvolvimento.html?=&t=acesso-ao-produto
+
+```{r}
+# Metropolitan areas classification
+metro <- read_xlsx("data/IBGE/Composicao_RMs_RIDEs_AglomUrbanas_2020_06_30.xlsx", sheet = 1) #local path of database
+#str(metro)
+a <- dim(metro)
+
+metro <- metro[,c(9,6)]
+#str(metro)
+
+metro <- metro %>%
+  rename(city_code = COD_MUN) %>%
+    mutate (metro_class = ifelse((TIPO == "RIDE" | TIPO == "RM"), "metro","urban"))
+#str(metro)
+
+# Match with city codes, 
+metro <- metro %>%
+  right_join(names, by = "city_code") %>% #to add all cities (non-metro and non-urban agglomeration)
+  distinct()
+#str(metro)
+
+metro <- metro[,c(1,3)]
+#str(metro)
+#sum(is.na(metro))
+
+# Replace NA values by 'non-metro/urban'
+metro[ is.na(metro)] <- "non-metro/urban"
+str(metro)
+sum(is.na(metro))
+
+# Save cleaned data
+metro %>%
+  write.csv("data_cleaned/db_geo_metro.csv",row.names=FALSE)
+```
+
+\pagebreak
+
+# Population data
+
+## Absolute population (2011-20)
+
+Source: Estimated population, IBGE, table 6576, https://sidra.ibge.gov.br/tabela/6579
+
+```{r}
+# Population
+pop_aux <- read_xlsx("data/IBGE/tabela6579_pop_2011-20.xlsx", sheet = 1) #local path of database
+#str(pop_aux)
+a <- dim(pop_aux)
+
+pop_aux <- pop_aux[-c(1,2,3,4,a[1]),]
+
+pop_aux <- pop_aux %>%
+  rename(city_UF = "Tabela 6579 - População residente estimada",
+         pop.2011 = ...2,
+         pop.2012 = ...3,
+         pop.2013 = ...4,
+         pop.2014 = ...5,
+         pop.2015 = ...6,
+         pop.2016 = ...7,
+         pop.2017 = ...8,
+         pop.2018 = ...9,
+         pop.2019 = ...10,
+         pop.2020 = ...11)
+#str(pop_aux)
+
+pop_aux[ pop_aux == "-" ] <- "0"
+#str(pop_aux)
+
+pop_aux <- bind_cols(pop_aux[,1], lapply(pop_aux[,c(2:11)], as.numeric))
+str(pop_aux)
+
+sum(is.na(pop_aux)) # cities non-existing in 2011
+which(is.na(pop_aux), arr.ind = TRUE)
+```
+
+```{r}
+# Calculate annual population growth
+pop <- pop_aux %>%
+  mutate(pop.growth2012_20 = (pop.2020/pop.2012)^(1/8)-1)
+#str(pop)
+
+# Match city codes
+pop <- pop %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop <- pop[,c(13,2:12)]
+str(pop)
+
+# Save cleaned data
+pop %>%
+  write.csv("data_cleaned/db_pop.csv",row.names=FALSE)
+```
+
+## Population by age bracket
+
+Source: IBGE, table 2093, https://sidra.ibge.gov.br/tabela/2093#:~:text=Tabela%202093%3A%20Popula%C3%A7%C3%A3o%20residente%20por,Amostra%20%2D%20Caracter%C3%ADsticas%20Gerais%20da%20Popula%C3%A7%C3%A3o
+
+```{r}
+# Population by age
+pop_age <- read_xlsx("data/IBGE/Censo_tabela2093_pop_idade.xlsx", sheet = 1) #local path of database
+#str(pop_age)
+a <- dim(pop_age)
+
+pop_age <- pop_age[-c(1:6,a[1]),]
+#str(pop_age)
+
+pop_age <- pop_age %>%
+  rename(city_UF = "Tabela 2093 - População residente por cor ou raça, sexo, situação do domicílio e grupos de idade - Amostra - Características Gerais da População",
+         pop.0_4 = ...5,
+         pop.5_9 = ...6,
+         pop.10_14 = ...7,
+         pop.15_19 = ...9,
+         pop.20_24 = ...12,
+         pop.25_29 = ...13,
+         pop.30_39 = ...14,
+         pop.40_49 = ...15,
+         pop.50_59 = ...16,
+         pop.60_69 = ...17,
+         pop.70plus = ...19)
+#str(pop_age)
+
+pop_age <- pop_age[-1,c(1,5,6,7,9,12:17,19)]
+#str(pop_age)
+
+pop_age[ pop_age == "-" ] <- "0"
+#str(pop_age)
+ 
+pop_age <- bind_cols(pop_age[,1], lapply(pop_age[,c(2:12)], as.numeric))
+#str(pop_age)
+
+# Match city codes
+pop_age <- pop_age %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_age <- pop_age[,c(13,2:12)]
+str(pop_age)
+
+# Save cleaned data
+pop_age %>%
+  write.csv("data_cleaned/db_pop_age.csv",row.names=FALSE)
+```
+
+## Population by sex
+
+Source: IBGE, table 2093, https://sidra.ibge.gov.br/tabela/2093#:~:text=Tabela%202093%3A%20Popula%C3%A7%C3%A3o%20residente%20por,Amostra%20%2D%20Caracter%C3%ADsticas%20Gerais%20da%20Popula%C3%A7%C3%A3o
+
+```{r}
+# Population by sex
+pop_sex <- read_xlsx("data/IBGE/Censo_tabela2093_pop_sexo.xlsx", sheet = 1) #local path of database
+#str(pop_sex)
+a <- dim(pop_sex)
+
+pop_sex <- pop_sex[-c(1,2,3,4,5,6,7,a[1]),]
+
+pop_sex <- pop_sex %>%
+  rename(city_UF = "Tabela 2093 - População residente por cor ou raça, sexo, situação do domicílio e grupos de idade - Amostra - Características Gerais da População",
+         pop.male = ...4,
+         pop.female = ...5)
+#str(pop_sex)
+
+pop_sex <- pop_sex[,c(1,4,5)]
+#str(pop_sex)
+
+pop_sex[ pop_sex == "-" ] <- "0"
+#str(pop_sex)
+
+pop_sex <- bind_cols(pop_sex[,1], lapply(pop_sex[,c(2,3)], as.numeric))
+#str(pop_sex)
+
+# Match city codes
+pop_sex <- pop_sex %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_sex <- pop_sex[,c(4,2:3)]
+str(pop_sex)
+
+# Save cleaned data
+pop_sex %>%
+  write.csv("data_cleaned/db_pop_sex.csv",row.names=FALSE)
+```
+
+## Population rural vs urban
+
+Source: IBGE, table 2093, https://sidra.ibge.gov.br/tabela/2093#:~:text=Tabela%202093%3A%20Popula%C3%A7%C3%A3o%20residente%20por,Amostra%20%2D%20Caracter%C3%ADsticas%20Gerais%20da%20Popula%C3%A7%C3%A3o
+
+```{r}
+# Population rural vs urban
+pop_urban <- read_xlsx("data/IBGE/Censo_tabela2093_pop_ruralVSurbana.xlsx", sheet = 1) #local path of database
+#str(pop_urban)
+a <- dim(pop_urban)
+
+pop_urban <- pop_urban[-c(1,2,3,4,5,6,7,8,a[1]),]
+
+pop_urban <- pop_urban %>%
+  rename(city_UF = "Tabela 2093 - População residente por cor ou raça, sexo, situação do domicílio e grupos de idade - Amostra - Características Gerais da População",
+         pop.urban = ...3,
+         pop.rural = ...4)
+#str(pop_urban)
+ 
+pop_urban <- pop_urban[,c(1,3,4)]
+#str(pop_urban)
+
+pop_urban[ pop_urban == "-" ] <- "0"
+#str(pop_urban)
+
+pop_urban <- bind_cols(pop_urban[,1], lapply(pop_urban[,c(2,3)], as.numeric))
+#str(pop_urban)
+
+# Match city codes
+pop_urban <- pop_urban %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_urban <- pop_urban[,c(4,2:3)]
+str(pop_urban)
+
+# Save cleaned data
+pop_urban %>%
+  write.csv("data_cleaned/db_pop_urban.csv",row.names=FALSE)
+```
+
+## Population by race
+
+Source: IBGE, table 2093, https://sidra.ibge.gov.br/tabela/2093#:~:text=Tabela%202093%3A%20Popula%C3%A7%C3%A3o%20residente%20por,Amostra%20%2D%20Caracter%C3%ADsticas%20Gerais%20da%20Popula%C3%A7%C3%A3o
+
+```{r}
+# Population by race
+pop_race <- read_xlsx("data/IBGE/Censo_tabela136_pop_raca.xlsx", sheet = 1) #local path of database
+#str(pop_race)
+a <- dim(pop_race)
+
+pop_race <- pop_race[-c(1,2,3,a[1]),]
+
+pop_race <- pop_race %>%
+  rename(city_UF = "Tabela 136 - População residente, por cor ou raça",
+         pop.white = ...17,
+         pop.black = ...18,
+         pop.asian = ...19,
+         pop.pardos = ...20,
+         pop.indigenous = ...21,
+         pop.others = ...22)
+#str(pop_race)
+  
+pop_race <- pop_race[-c(1,2),c(1,17,18,19,20,21,22)]
+#str(pop_race)
+
+pop_race[ pop_race == "-" ] <- "0"
+#str(pop_race)
+
+pop_race <- bind_cols(pop_race[,1], lapply(pop_race[,c(2:7)], as.numeric))
+#str(pop_race)
+
+# Match city codes
+pop_race <- pop_race %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_race <- pop_race[,c(8,2:7)]
+str(pop_race)
+
+# Save cleaned data
+pop_race %>%
+  write.csv("data_cleaned/db_pop_race.csv",row.names=FALSE)
+```
+
+## Population by education
+
+Source: IBGE, table 1972, https://sidra.ibge.gov.br/tabela/1972
+
+```{r}
+# Population by education level
+pop_edu.lvl <- read_xlsx("data/IBGE/Censo_tabela1972_pop_educacaototal.xlsx", sheet = 1) #local path of database
+#str(pop_edu.lvl)
+a <- dim(pop_edu.lvl)
+
+pop_edu.lvl <- pop_edu.lvl[-c(1,2,3,4,5,6,a[1]),]
+ 
+pop_edu.lvl <- pop_edu.lvl %>%
+  rename(city_UF = "Tabela 1972 - Pessoas que frequentavam creche ou escola por nível e rede de ensino",
+         pop.edu.kindergarten = ...3, #PT: creche 
+         pop.edu.pre = ...4, #PT: pré-escolar
+         pop.edu.literacy = ...5, #PT: alfabetização
+         pop.edu.literacy_adults = ...6, #PT: alfabetização de jovens e adultos
+         pop.edu.elem = ...7, #PT: fundamental
+         pop.edu.elem_adults = ...8, #PT: fundamental de jovens e adultos
+         pop.edu.high = ...9, #PT: ensino médio
+         pop.edu.high_adults = ...10, #PT: ensino médio de jovens e adultos
+         pop.edu.undergrad = ...11, #PT: graduação
+         pop.edu.grad = ...12, #PT: especialização
+         pop.edu.master = ...13, #PT: mestrado
+         pop.edu.doc = ...14) #PT: doutorado
+#str(pop_edu.lvl)
+
+pop_edu.lvl <- pop_edu.lvl[,-c(2)]
+#str(pop_edu.lvl)
+ 
+pop_edu.lvl[ pop_edu.lvl == "-" ] <- "0"
+#str(pop_edu.lvl)
+ 
+pop_edu.lvl <- bind_cols(pop_edu.lvl[,1], lapply(pop_edu.lvl[,c(2:13)], as.numeric))
+str(pop_edu.lvl)
+```
+
+```{r}
+# Population by education type (private vs public)
+pop_edu.type <- read_xlsx("data/IBGE/Censo_tabela1972_pop_educacaoprivadaVSpublica.xlsx", sheet = 1) #local path of database
+#str(pop_edu.type)
+a <- dim(pop_edu.type)
+
+pop_edu.type <- pop_edu.type[-c(1:6,a[1]),]
+ 
+pop_edu.type <- pop_edu.type %>%
+  rename(city_UF = "Tabela 1972 - Pessoas que frequentavam creche ou escola por nível e rede de ensino",
+         pop.edu.public = ...3,
+         pop.edu.private = ...4)
+#str(pop_edu.type)
+ 
+pop_edu.type <- pop_edu.type[,-c(2)]
+#str(pop_edu.type)
+  
+pop_edu.type[ pop_edu.type == "-" ] <- "0"
+#str(pop_edu.type)
+  
+pop_edu.type <- bind_cols(pop_edu.type[,1], lapply(pop_edu.type[,c(2:3)], as.numeric))
+#str(pop_edu.type)
+
+#Join education levels and type data sets
+pop_edu <- left_join(pop_edu.lvl, pop_edu.type, by = "city_UF")
+#str(pop_edu)
+
+# Match city codes
+pop_edu <- pop_edu %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_edu <- pop_edu[,c(16,2:15)]
+str(pop_edu)
+
+# Save cleaned data
+pop_edu %>%
+  write.csv("data_cleaned/db_pop_edu.csv",row.names=FALSE)
+```
+
+## Residents per house
+
+Source: IBGE, tabela 156, https://sidra.ibge.gov.br/tabela/156#:~:text=Tabela%20156%3A%20Domic%C3%ADlios%20particulares%20ocupados,moradores%20em%20domic%C3%ADlios%20particulares%20ocupados
+
+```{r}
+# Average residents per house
+pop_residents <- read_xlsx("data/IBGE/Censo_tabela156_domicilios.xlsx", sheet = 3) #local path of database
+#str(pop_residents)
+a <- dim(pop_residents)
+
+pop_residents <- pop_residents[-c(1:4,a[1]),]
+  
+pop_residents <- pop_residents %>%
+  rename(city_UF = "Tabela 156 - Domicílios particulares ocupados, moradores em domicílios particulares ocupados e média de moradores em domicílios particulares ocupados",
+         pop.residPerHouse = ...4)
+#str(pop_residents)
+
+pop_residents <- pop_residents[,-c(2,3)]
+#str(pop_residents)
+ 
+pop_residents[ pop_residents == "-" ] <- "0"
+#str(pop_residents)
+   
+pop_residents <- bind_cols(pop_residents[,1], lapply(pop_residents[,c(2)], as.numeric))
+#str(pop_residents)
+
+# Match city codes
+pop_residents <- pop_residents %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_residents <- pop_residents[,c(3,2)]
+str(pop_residents)
+ 
+# Save cleaned data
+pop_residents %>%
+  write.csv("data_cleaned/db_pop_residents.csv",row.names=FALSE)
+
+```
+
+## Rooms per house
+
+Source: IBGE, tabela 206, https://sidra.ibge.gov.br/tabela/206
+
+```{r}
+# Average rooms per house
+pop_rooms <- read_xlsx("data/IBGE/Censo_tabela206_dom_comodos.xlsx", sheet = 1) #local path of database
+#str(pop_rooms)
+a <- dim(pop_rooms)
+
+pop_rooms <- pop_rooms[-c(1:6,a[1]),]
+  
+pop_rooms <- pop_rooms %>%
+  rename(city_UF = "Tabela 206 - Domicílios particulares permanentes por situação do domicílio e número de cômodos",
+         pop.1rooms = ...3,
+         pop.2rooms = ...4,
+         pop.3rooms = ...5,
+         pop.4rooms = ...6,
+         pop.5rooms = ...7,
+         pop.6rooms = ...8,
+         pop.7rooms = ...9,
+         pop.8rooms = ...10,
+         pop.9rooms = ...11,
+         pop.10plusrooms = ...12)
+#str(pop_rooms)
+sum(is.na(pop_rooms))
+ 
+pop_rooms <- pop_rooms[,c(1,3:12)]
+#str(pop_rooms)
+  
+pop_rooms[ pop_rooms == "-" ] <- "0"
+#str(pop_rooms)
+    
+pop_rooms <- bind_cols(pop_rooms[,1], lapply(pop_rooms[,c(2:11)], as.numeric))
+#str(pop_rooms)
+
+pop_rooms <- pop_rooms %>%
+  mutate(pop.room.avg = 1/100*(1*pop.1rooms+
+                        2*pop.2rooms+
+                        3*pop.3rooms+
+                        4*pop.4rooms+
+                        5*pop.5rooms+
+                        6*pop.6rooms+
+                        7*pop.7rooms+
+                        8*pop.8rooms+
+                        9*pop.9rooms+
+                        10*pop.10plusrooms)) #assuming 10+ rooms with 10 rooms
+#str(pop_rooms)
+
+sum(is.na(pop_rooms))
+which(is.na(pop_rooms), arr.ind = TRUE)
+pop_rooms <- pop_rooms[-1075,] # remove noise (city mislabeled in the orginal data)
+
+sum(is.na(pop_rooms))
+
+# Match city codes
+pop_rooms <- pop_rooms %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_rooms <- pop_rooms[,c(13,2:12)]
+str(pop_rooms)
+
+# Save cleaned data
+pop_rooms %>%
+  write.csv("data_cleaned/db_pop_rooms.csv",row.names=FALSE)
+
+```
+
+## Population density
+
+Source: IBGE, table 1301, https://sidra.ibge.gov.br/tabela/1301
+
+```{r}
+# Population density (2010)
+pop.density_aux <- read_xlsx("data/IBGE/tabela1301_area_densidade.xlsx", sheet = 2) #local path of database
+#str(pop.density_aux)
+a <- dim(pop.density_aux)
+
+pop.density_aux <- pop.density_aux[-c(1,2,3,4,a[1]),]
+ 
+pop.density_aux <- pop.density_aux %>%
+  rename(city_UF = "Tabela 1301 - Área e Densidade demográfica da unidade territorial",
+         pop.density2010 = ...2)
+#str(pop.density_aux)
+
+pop.density_aux[ pop.density_aux == "-" ] <- "0"
+#str(pop.density_aux)
+
+pop.density_aux <- bind_cols(pop.density_aux[,1], lapply(pop.density_aux[,2], as.numeric))
+#str(pop.density_aux)
+
+# Match city codes
+pop.density_aux <- pop.density_aux %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop.density_aux <- pop.density_aux[,c(3,2)]
+str(pop.density_aux)
+```
+
+````{r}
+# Population density (tot pop 2015, urban area 2015, % urban 2010)
+pop_density <- pop.density_aux %>%
+  left_join(pop[,c("city_code","pop.2015")], by = "city_code") %>%
+    left_join(pop_urban, by = "city_code") %>%  
+      inner_join(area_urban, by = "city_code")
+#str(pop_density)
+    
+pop_density <-data.frame(pop_density) %>%
+  mutate(pop.urbanDensity = (pop.urban * pop.2015 /100) / area.urban)
+ 
+pop_density <- pop_density[,c(1,2,7)]
+str(pop_density)
+
+# Save cleaned data
+pop_density %>%
+  write.csv("data_cleaned/db_pop_density.csv",row.names=FALSE)
+```
+
+## Access to tap  water
+
+Source: IBGE, table 2065, https://sidra.ibge.gov.br/tabela/2065
+
+```{r}
+# Houses with access to tap (cleaned  and pipped) water
+pop_water <- read_xlsx("data/IBGE/Censo_tabela2065_aguaEncanada.xlsx", sheet = 1) #local path of database
+#str(pop_water)
+a <- dim(pop_water)
+
+pop_water <- pop_water[-c(1:5,a[1]),]
+  
+pop_water <- pop_water %>%
+ rename(city_UF = "Tabela 2065 - Domicílios particulares permanentes, por existência de água canalizada e forma de abastecimento de água - Resultados Gerais da Amostra",
+        pop.water.access = ...3,
+        pop.water.accessInHouse = ...4,
+        pop.water.accessInProperty = ...5,
+        pop.water.noaccess = ...6)
+#str(pop.water)
+ 
+pop_water <- pop_water[,-c(2)]
+
+pop_water[ pop_water == "-" ] <- "0"
+#str(pop_water)
+
+pop_water <- bind_cols(pop_water[,1], lapply(pop_water[,2:5], as.numeric))
+#str(pop_water)
+ 
+# Match city codes
+pop_water <- pop_water %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_water <- pop_water[,c(6,2:5)]
+str(pop_water)
+
+# Save cleaned data
+pop_water %>%
+  write.csv("data_cleaned/db_pop_water.csv",row.names=FALSE)
+```
+
+## Bathrooms and sewage
+
+Source: IBGE, table 3360, https://sidra.ibge.gov.br/tabela/3360
+
+```{r}
+# Houses with access to tap (cleaned  and pipped) water
+pop_bathrooms <- read_xlsx("data/IBGE/Censo_tabela3360_banheiros.xlsx", sheet = 1) #local path of database
+#str(pop_bathrooms)
+a <- dim(pop_bathrooms)
+
+pop_bathrooms <- pop_bathrooms[-c(1:6,a[1]),]
+  
+pop_bathrooms <- pop_bathrooms %>%
+ rename(city_UF = "Tabela 3360 - Domicílios particulares permanentes e Moradores em domicílios particulares permanentes, em áreas urbanas com ordenamento regular, por existência de banheiro ou sanitário e tipo de esgotamento sanitário e existência e características do entorno",
+        pop.bathroom.access = ...4,
+        pop.bathroom.access.sewage = ...5,
+        pop.bathroom.access.septicTank = ...6,
+        pop.bathroom.access.other = ...7,
+        pop.bathroom.noaccess = ...8)
+#str(pop_bathrooms)
+  
+pop_bathrooms <- pop_bathrooms[,-c(2,3)]
+#str(pop_bathrooms)
+
+pop_bathrooms[ pop_bathrooms == "-" ] <- "0"
+#str(pop_bathrooms)
+
+pop_bathrooms <- bind_cols(pop_bathrooms[,1], lapply(pop_bathrooms[,2:6], as.numeric))
+#str(pop_bathrooms)
+
+# Match city codes
+pop_bathrooms <- pop_bathrooms %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+pop_bathrooms <- pop_bathrooms[,c(7,2:6)]
+str(pop_bathrooms)
+  
+# Save cleaned data
+pop_bathrooms %>%
+  write.csv("data_cleaned/db_pop_bathrooms.csv",row.names=FALSE)
+```
+
+\pagebreak
+
+# Economic data
+
+## GDP by city (2010-18)
+
+```{r}
+# Total GDP
+GDP.2010_14 <- read_xlsx("data/IBGE/tabela5938_PIB_2010-14.xlsx", sheet = 1) #local path of database
+#str(GDP.2010_14)
+a <- dim(GDP.2010_14)
+
+GDP.2010_14 <- GDP.2010_14[-c(1,2,3,a[1]),]
+  
+GDP.2010_14 <- GDP.2010_14 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.2010 = ...2,
+         GDP.2011 = ...3,
+         GDP.2012 = ...4,
+         GDP.2013 = ...5,
+         GDP.2014 = ...6)
+str(GDP.2010_14)
+
+GDP.2015_18 <- read_xlsx("data/IBGE/tabela5938_PIB_2015-18.xlsx", sheet = 1) #local path of database
+#str(GDP.2015_18)
+a <- dim(GDP.2015_18)
+
+GDP.2015_18 <- GDP.2015_18[-c(1,2,3,a[1]),]
+  
+GDP.2015_18 <- GDP.2015_18 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.2015 = ...2,
+         GDP.2016 = ...3,
+         GDP.2017 = ...4,
+         GDP.2018 = ...5)
+str(GDP.2015_18)
+```
+
+```{r}
+# Tax GDP
+GDP.tax.2010_14 <- read_xlsx("data/IBGE/tabela5938_PIB_2010-14.xlsx", sheet = 2) #local path of database
+#str(GDP.tax.2010_14)
+a <- dim(GDP.tax.2010_14)
+
+GDP.tax.2010_14 <- GDP.tax.2010_14[-c(1,2,3,a[1]),]
+  
+GDP.tax.2010_14 <- GDP.tax.2010_14 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.tax.2010 = ...2,
+         GDP.tax.2011 = ...3,
+         GDP.tax.2012 = ...4,
+         GDP.tax.2013 = ...5,
+         GDP.tax.2014 = ...6)
+str(GDP.tax.2010_14)
+
+GDP.tax.2015_18 <- read_xlsx("data/IBGE/tabela5938_PIB_2015-18.xlsx", sheet = 2) #local path of database
+#str(GDP.tax.2015_18)
+a <- dim(GDP.tax.2015_18)
+
+GDP.tax.2015_18 <- GDP.tax.2015_18[-c(1,2,3,a[1]),]
+  
+GDP.tax.2015_18 <- GDP.tax.2015_18 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.tax.2015 = ...2,
+         GDP.tax.2016 = ...3,
+         GDP.tax.2017 = ...4,
+         GDP.tax.2018 = ...5)
+str(GDP.tax.2015_18)
+```  
+
+```{r}
+# Agriculture GDP
+GDP.agri.2010_14 <- read_xlsx("data/IBGE/tabela5938_PIB_2010-14.xlsx", sheet = 4) #local path of database
+#str(GDP.agri.2010_14)
+a <- dim(GDP.agri.2010_14)
+
+GDP.agri.2010_14 <- GDP.agri.2010_14[-c(1,2,3,a[1]),]
+  
+GDP.agri.2010_14 <- GDP.agri.2010_14 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.agri.2010 = ...2,
+         GDP.agri.2011 = ...3,
+         GDP.agri.2012 = ...4,
+         GDP.agri.2013 = ...5,
+         GDP.agri.2014 = ...6)
+str(GDP.agri.2010_14)
+
+GDP.agri.2015_18 <- read_xlsx("data/IBGE/tabela5938_PIB_2015-18.xlsx", sheet = 4) #local path of database
+#str(GDP.agri.2015_18)
+a <- dim(GDP.agri.2015_18)
+
+GDP.agri.2015_18 <- GDP.agri.2015_18[-c(1,2,3,a[1]),]
+  
+GDP.agri.2015_18 <- GDP.agri.2015_18 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.agri.2015 = ...2,
+         GDP.agri.2016 = ...3,
+         GDP.agri.2017 = ...4,
+         GDP.agri.2018 = ...5)
+str(GDP.agri.2015_18)
+```
+
+```{r}
+# Industry GDP
+GDP.industry.2010_14 <- read_xlsx("data/IBGE/tabela5938_PIB_2010-14.xlsx", sheet = 5) #local path of database
+#str(GDP.industry.2010_14)
+a <- dim(GDP.industry.2010_14)
+
+GDP.industry.2010_14 <- GDP.industry.2010_14[-c(1,2,3,a[1]),]
+  
+GDP.industry.2010_14 <- GDP.industry.2010_14 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.industry.2010 = ...2,
+         GDP.industry.2011 = ...3,
+         GDP.industry.2012 = ...4,
+         GDP.industry.2013 = ...5,
+         GDP.industry.2014 = ...6)
+str(GDP.industry.2010_14)
+
+
+GDP.industry.2015_18 <- read_xlsx("data/IBGE/tabela5938_PIB_2015-18.xlsx", sheet = 5) #local path of database
+#str(GDP.industry.2015_18)
+a <- dim(GDP.industry.2015_18)
+
+GDP.industry.2015_18 <- GDP.industry.2015_18[-c(1,2,3,a[1]),]
+  
+GDP.industry.2015_18 <- GDP.industry.2015_18 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.industry.2015 = ...2,
+         GDP.industry.2016 = ...3,
+         GDP.industry.2017 = ...4,
+         GDP.industry.2018 = ...5)
+str(GDP.industry.2015_18)
+```
+
+```{r}
+# Services GDP
+GDP.services.2010_14 <- read_xlsx("data/IBGE/tabela5938_PIB_2010-14.xlsx", sheet = 6) #local path of database
+#str(GDP.services.2010_14)
+a <- dim(GDP.services.2010_14)
+
+GDP.services.2010_14 <- GDP.services.2010_14[-c(1,2,3,a[1]),]
+  
+GDP.services.2010_14 <- GDP.services.2010_14 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.services.2010 = ...2,
+         GDP.services.2011 = ...3,
+         GDP.services.2012 = ...4,
+         GDP.services.2013 = ...5,
+         GDP.services.2014 = ...6)
+str(GDP.services.2010_14)
+
+
+GDP.services.2015_18 <- read_xlsx("data/IBGE/tabela5938_PIB_2015-18.xlsx", sheet = 6) #local path of database
+#str(GDP.services.2015_18)
+a <- dim(GDP.services.2015_18)
+
+GDP.services.2015_18 <- GDP.services.2015_18[-c(1,2,3,a[1]),]
+  
+GDP.services.2015_18 <- GDP.services.2015_18 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.services.2015 = ...2,
+         GDP.services.2016 = ...3,
+         GDP.services.2017 = ...4,
+         GDP.services.2018 = ...5)
+str(GDP.services.2015_18)
+```
+
+```{r}
+# Government GDP
+GDP.govt.2010_14 <- read_xlsx("data/IBGE/tabela5938_PIB_2010-14.xlsx", sheet = 7) #local path of database
+#str(GDP.govt.2010_14)
+a <- dim(GDP.govt.2010_14)
+
+GDP.govt.2010_14 <- GDP.govt.2010_14[-c(1,2,3,a[1]),]
+  
+GDP.govt.2010_14 <- GDP.govt.2010_14 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.govt.2010 = ...2,
+         GDP.govt.2011 = ...3,
+         GDP.govt.2012 = ...4,
+         GDP.govt.2013 = ...5,
+         GDP.govt.2014 = ...6)
+str(GDP.govt.2010_14)
+
+GDP.govt.2015_18 <- read_xlsx("data/IBGE/tabela5938_PIB_2015-18.xlsx", sheet = 7) #local path of database
+#str(GDP.govt.2015_18)
+a <- dim(GDP.govt.2015_18)
+
+GDP.govt.2015_18 <- GDP.govt.2015_18[-c(1,2,3,a[1]),]
+  
+GDP.govt.2015_18 <- GDP.govt.2015_18 %>%
+  rename(city_UF = "Tabela 5938 - Produto interno bruto a preços correntes, impostos, líquidos de subsídios, sobre produtos a preços correntes e valor adicionado bruto a preços correntes total e por atividade econômica, e respectivas participações - Referência 2010",
+         GDP.govt.2015 = ...2,
+         GDP.govt.2016 = ...3,
+         GDP.govt.2017 = ...4,
+         GDP.govt.2018 = ...5)
+str(GDP.govt.2015_18)
+```
+
+```{r}
+GDP_aux <- GDP.2015_18 %>%
+  select(city_UF)
+
+# Select GDP data with economy sector (2018)
+GDP_aux <- bind_cols(GDP_aux, 
+          as.numeric(unlist(GDP.agri.2015_18$GDP.agri.2018)), 
+          as.numeric(unlist(GDP.govt.2015_18$GDP.govt.2018)), 
+          as.numeric(unlist(GDP.industry.2015_18$GDP.industry.2018)), 
+          as.numeric(unlist(GDP.services.2015_18$GDP.services.2018)), 
+          as.numeric(unlist(GDP.tax.2015_18$GDP.tax.2018))) %>%
+  rename(GDP.agri.2018 = ...2, 
+         GDP.govt.2018 = ...3, 
+         GDP.industry.2018 = ...4, 
+         GDP.services.2018 = ...5, 
+         GDP.tax.2018 = ...6)
+#str(GDP_aux)
+
+# Calculate GDP % per economy sector
+
+GDP_aux <- GDP_aux %>%
+    mutate(GDP.2018 = rowSums(.[2:6])) %>%
+      mutate(GDP.agri.2018_pct = GDP.agri.2018 / GDP.2018,
+             GDP.govt.2018_pct = GDP.govt.2018 / GDP.2018,
+             GDP.industry.2018_pct = GDP.industry.2018 / GDP.2018,
+             GDP.services.2018_pct = GDP.services.2018 / GDP.2018,
+             GDP.tax.2018_pct = GDP.tax.2018 / GDP.2018)
+     
+GDP_aux <- GDP_aux[,c(1,8,9,10,11,12,7)]
+str(GDP_aux)
+```
+
+```{r}
+GDP_aux2 <- GDP.2015_18 %>%
+  select(city_UF)
+
+# Select GDP data to calculate growth (2010, 15, 18)
+GDP_aux2 <-  GDP_aux2 %>%
+  left_join(GDP.2010_14, by = "city_UF") %>%
+    left_join(GDP.2015_18, by = "city_UF") %>%
+      select(city_UF,GDP.2010, GDP.2015, GDP.2018)
+#str(GDP_aux2)
+
+GDP_aux2[ GDP_aux2 == "-" ] <- "0"
+#str(GDP_aux2)
+#sum(is.na(GDP_aux2))
+
+GDP_aux2 <- bind_cols(GDP_aux2[,1], lapply(GDP_aux2[,2:4], as.numeric))
+#str(GDP_aux2)
+#sum(is.na(GDP_aux2))
+#which(is.na(GDP_aux2), arr.ind = TRUE)
+
+# Calculate annual nominal growth
+GDP_aux2 <- data.frame(GDP_aux2) %>%
+    mutate(GDP.growth2010_15 = (GDP.2015/GDP.2010)^(1/5)-1) %>%
+    mutate(GDP.growth2015_18 = (GDP.2018/GDP.2015)^(1/3)-1)
+#str(GDP_aux2)
+
+GDP_aux2 <- GDP_aux2[,c(1,5,6)]
+str(GDP_aux2)
+sum(is.na(GDP_aux2))
+which(is.na(GDP_aux2), arr.ind = TRUE) # cities non-existing in 2010 or 2015
+```
+
+```{r}
+# Calculate GDP per capita in 2018
+GDP_aux3 <- GDP_aux %>%
+  select(city_UF, GDP.2018) %>%
+    left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux")) %>%
+      left_join(pop[,c("city_code","pop.2018")]) %>%
+        mutate(GDP.percapita.2018 = GDP.2018 / pop.2018)
+#str(GDP_aux3)
+
+GDP_aux3 <- GDP_aux3[,c(1,3,5)]
+str(GDP_aux3)
+```
+
+```{r}
+# Join all GDP tables 
+GDP <- left_join(GDP_aux[,-7], GDP_aux2, by = "city_UF") %>%
+  left_join(GDP_aux3, by = "city_UF")
+
+GDP <- GDP[,c(9,2:8,10)]
+str(GDP) 
+
+sum(is.na(GDP))
+
+# Save cleaned data
+GDP %>%
+  write.csv("data_cleaned/db_econ_GDP.csv",row.names=FALSE)
+```
+
+## Work commuting time
+
+Source: IBGE, table 3422, https://sidra.ibge.gov.br/tabela/3422
+
+```{r}
+# Work commuting time
+commute_time <- read_xlsx("data/IBGE/Censo_tabela3422_tempoDeslocamento.xlsx", sheet = 1) #local path of database
+#str(commute_time)
+a <- dim(commute_time)
+
+commute_time <- commute_time[-c(1:5,a[1]),-c(2)]
+
+commute_time <- commute_time %>%
+  rename(city_UF = "Tabela 3422 - Pessoas ocupadas na semana de referência, que trabalhavam fora do domicílio e retornavam para seu domicílio diariamente, por tempo habitual de deslocamento para o trabalho - Resultados Gerais da Amostra",
+         time.5min = ...3,
+         time.6_30min = ...4,
+         time.30_60min = ...5,
+         time.1_2h = ...6,
+         time.2hplus = ...7)
+#str(commute_time)
+ 
+commute_time[ commute_time == "-" ] <- "0"
+#str(commute_time)
+
+commute_time <- bind_cols(commute_time[,1], lapply(commute_time[,c(2:6)], as.numeric))
+#str(commute_time)
+
+# Calculate average time
+commute_time <- commute_time %>%
+  mutate(time.avg = 1/100*(5*time.5min+ # assuming 5 min for avg
+                           18*time.6_30min+  # assuming 18 min [=(6+30)/2] for avg
+                           45*time.30_60min+  # assuming 4 min [=(30+60)/2] for avg
+                           90*time.1_2h+  # assuming 90 min [=(60+120)/2] for avg
+                           120*time.2hplus)) # assuming 120 min for avg
+#str(commute_time)
+
+# Match city codes
+commute_time <- commute_time %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+commute_time <- commute_time[,c(8,2:7)]
+str(commute_time)
+ 
+# Save cleaned data
+commute_time %>%
+  write.csv("data_cleaned/db_econ_commute_time.csv",row.names=FALSE)
+```
+
+## Population by wage level
+
+Source: IBGE, table 3277, https://sidra.ibge.gov.br/tabela/3277
+
+```{r}
+# Wage level
+wages_level <- read_xlsx("data/IBGE/Censo_tabela3277_pop_rendimento.xlsx", sheet = 1) #local path of database
+#str(wages_level)
+a <- dim(wages_level)
+
+wages_level <- wages_level[-c(1:6,a[1]),-c(2:4,17)]
+ 
+wages_level <- wages_level %>%
+  rename(city_UF = "Tabela 3277 - Pessoas de 10 anos ou mais de idade, por classes de rendimento nominal mensal, segundo a situação do domicílio, o sexo e os grupos de idade",
+         wages_less0.25 = ...5,
+         wages_0.25to0.5 = ...6,
+         wages_0.5to1 = ...7,
+         wages_1to2 = ...8,
+         wages_2to3 = ...9,
+         wages_3to5 = ...10,
+         wages_5to10 = ...11,
+         wages_10to15 = ...12,
+         wages_15to20 = ...13,
+         wages_20to30 = ...14,
+         wages_30plus = ...15,
+         wages_noWage = ...16)
+#str(wages_level)
+  
+wages_level[ wages_level == "-" ] <- "0"
+#str(wages_level)
+ 
+wages_level <- bind_cols(wages_level[,1], lapply(wages_level[,c(2:13)], as.numeric))
+#str(wages_level)
+
+# Calculate average wage
+wages_level <- wages_level %>%
+  mutate(wages_avg = 1/100*(0.25*wages_less0.25+ # assuming 0.25 minimum wages
+                            0.375*wages_0.25to0.5+ # assuming 0.375 [=(0.25+0.5)/2] minimum wages
+                            0.75*wages_0.5to1+ # assuming 0.75
+                            1.5*wages_1to2+ # assuming 1.5
+                            2.5*wages_2to3+ # assuming 2.5
+                            4*wages_3to5+ # assuming 4
+                            7.5*wages_5to10+ # assuming 7.5
+                            12.5*wages_10to15+ # assuming 12.5
+                            17.5*wages_15to20+ # assuming 17.5
+                            25*wages_20to30+ # assuming 25
+                            30*wages_30plus+ # assuming 30
+                            0*wages_noWage)) # assuming 0
+#str(wages_level)
+
+# Match city codes
+wages_level <- wages_level %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+wages_level <- wages_level[,c(15,2:14)]
+str(wages_level)
+  
+# Save cleaned data
+wages_level %>%
+  write.csv("data_cleaned/db_econ_wages_level.csv",row.names=FALSE)
+```
+
+## Employment type
+
+Source: IBGE, table 1577, https://sidra.ibge.gov.br/tabela/1577
+
+```{r}
+# Employment type
+employment_category <- read_xlsx("data/IBGE/Censo_tabela1577_tipoEmprego.xlsx", sheet = 1) #local path of database
+#str(employment_category)
+a <- dim(employment_category)
+
+employment_category <- employment_category[-c(1:5,a[1]),-c(2)]
+ 
+employment_category <- employment_category %>%
+  rename(city_UF = "Tabela 1577 - Pessoas de 10 anos ou mais de idade por idade, ocupadas na semana de referência, por posição na ocupação e categoria do emprego no trabalho principal - Resultados Gerais da Amostra",
+         employed = ...3,
+         employed.privateFormal = ...4,
+         employed.publicFormal = ...5,
+         employed.informal = ...6,
+         employed.noWage = ...7,
+         employed.subsistence = ...8,
+         employed.owner = ...9,
+         employed.self = ...10)
+#str(employment_category)
+
+employment_category[ employment_category == "-" ] <- "0"
+#str(employment_category)
+  
+employment_category <- bind_cols(employment_category[,1], lapply(employment_category[,c(2:9)], as.numeric))
+#str(employment_category)
+ 
+# Match city codes
+employment_category <- employment_category %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+employment_category <- employment_category[,c(10,2:9)]
+str(employment_category)
+
+# Save cleaned data
+employment_category %>%
+  write.csv("data_cleaned/db_econ_employment_category.csv",row.names=FALSE)
+```
+
+## Average working hours
+
+Source: IBGE, table 1579, https://sidra.ibge.gov.br/tabela/1579
+
+```{r}
+# Number of working hours
+working_hours <- read_xlsx("data/IBGE/Censo_tabela1579_horasTrabalho.xlsx", sheet = 1) #local path of database
+#str(working_hours)
+a <- dim(working_hours)
+
+working_hours <- working_hours[-c(1:5,a[1]),-c(2)]
+  
+working_hours <- working_hours %>%
+  rename(city_UF = "Tabela 1579 - Pessoas de 10 anos ou mais de idade, ocupadas na semana de referência, por grupos de horas habitualmente trabalhadas por semana no trabalho principal - Resultados Gerais da Amostra",
+         workingHours_less14h = ...3,
+         workingHours_15to39h = ...4,
+         workingHours_40to44h = ...5,
+         workingHours_45to48h = ...6,
+         workingHours_49hplus = ...7)
+#str(working_hours)
+   
+working_hours[ working_hours == "-" ] <- "0"
+#str(working_hours)
+  
+working_hours <- bind_cols(working_hours[,1], lapply(working_hours[,c(2:6)], as.numeric))
+#str(working_hours)
+ 
+# Calculate average wage
+working_hours <- working_hours %>%
+  mutate(working_hours.avg = 1/100*(14*workingHours_less14h+ # assuming 14h
+                                    27*workingHours_15to39h+ # assuming 27h [=(15+39)/2]
+                                    42*workingHours_40to44h+ # assuming 42h
+                                    46.5*workingHours_45to48h+ # assuming 46.5h
+                                    49*workingHours_49hplus)) # assuming 49h
+#str(working_hours)
+ 
+# Match city codes
+working_hours <- working_hours %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+working_hours <- working_hours[,c(8,2:7)]
+
+str(working_hours)
+   
+# Save cleaned data
+working_hours %>%
+  write.csv("data_cleaned/db_econ_working_hours.csv",row.names=FALSE)
+```
+
+## Employment evolution
+
+Source: RAIS, https://bi.mte.gov.br/bgcaged/caged_rais_estabelecimento_id/login.php (login basico, password 12345678)
+
+```{r}
+# Evolution of number of employed (2002-19)
+employment_evo <- read.csv("data/RAIS/VinculosAtivos_2002-19.csv") #local path of database
+#str(employment_evo)
+a <- dim(employment_evo)
+
+employment_evo <- employment_evo[-c(5572:a[1]),c("Município","X2012","X2015","X2018","X2019")]
+#str(employment_evo)
+
+employment_evo <- employment_evo[-4924,] ## remove noise from original base (duplicated city)
+
+employment_evo <- bind_cols(employment_evo[,1], lapply(employment_evo[,c(2:5)], as.numeric))
+#str(employment_evo)
+
+employment_evo <- employment_evo %>%
+  left_join(names_code7.final, by = c("...1" = "PT_city_UF_aux"))
+
+# Calculate employed per population
+employment_evo <- employment_evo %>%
+  left_join(pop[,c("city_code","pop.2012","pop.2015","pop.2018","pop.2019")], by = "city_code") %>%
+    mutate(employment.rate2012 = X2012 / pop.2012,
+           employment.rate2015 = X2015 / pop.2015,
+           employment.rate2018 = X2018 / pop.2018,
+           employment.rate2019 = X2019 / pop.2019)
+
+employment_evo <- employment_evo[,c("city_code","employment.rate2012", "employment.rate2015", "employment.rate2018", "employment.rate2019")]
+# str(employment_evo)
+# sum(is.na(employment_evo))
+
+# Calculate growth in employment rate
+employment_evo <- employment_evo %>%
+  mutate(employment.annualgrowth.2012to15 = (employment.rate2015 - employment.rate2012)/3,
+         employment.annualgrowth.2015to18 = (employment.rate2018 - employment.rate2015)/3,
+         employment.annualgrowth.2018to19 = (employment.rate2019 - employment.rate2018))
+
+employment_evo <- employment_evo[,c("city_code",
+                                    "employment.rate2019",
+                                    "employment.annualgrowth.2012to15",
+                                    "employment.annualgrowth.2015to18",
+                                    "employment.annualgrowth.2018to19")]
+str(employment_evo)
+sum(is.na(employment_evo))
+
+# Save cleaned data
+employment_evo %>%
+  write.csv("data_cleaned/db_econ_employment_evo.csv",row.names=FALSE)
+```
+
+## Employed by economy sector
+
+Source: RAIS, https://bi.mte.gov.br/bgcaged/caged_rais_estabelecimento_id/login.php (login basico, password 12345678)
+
+```{r}
+# Number of employed by economy sector (2019)
+employment_sector <- read.csv("data/RAIS/VinculosAtivos-byActivity_2019.csv") #local path of database
+#str(employment_sector)
+a <- dim(employment_sector)
+
+employment_sector <- employment_sector[-c(5571:a[1]),]
+#str(employment_sector)
+ 
+employment_sector <- bind_cols(employment_sector[,1], lapply(employment_sector[,c(2:23)], as.numeric))
+#str(employment_sector)
+    
+employment_sector <- employment_sector %>%
+  rename(city_UF = ...1, 
+         employment.agri = Agricultura..Pecuária..Produção.Florestal..Pesca.e.AqÜIcultura,
+         employment.indExtractive = Indústrias.Extrativas,
+         employment.indTransform = Indústrias.de.Transformação,
+         employment.power = Eletricidade.e.Gás,
+         employment.waterSewage = Água..Esgoto..Atividades.de.Gestão.de.Resíduos.e.Descontaminação,
+         employment.building = Construção,
+         employment.trade = Comércio..Reparação.de.Veículos.Automotores.e.Motocicletas,
+         employment.transport = Transporte..Armazenagem.e.Correio,
+         employment.foodLodging = Alojamento.e.Alimentação,
+         employment.communication = Informação.e.Comunicação,
+         employment.finance = Atividades.Financeiras..de.Seguros.e.Serviços.Relacionados,
+         employment.realState = Atividades.Imobiliárias,
+         employment.professional = Atividades.Profissionais..Científicas.e.Técnicas,
+         employment.admin = Atividades.Administrativas.e.Serviços.Complementares,
+         employment.public = Administração.Pública..Defesa.e.Seguridade.Social,
+         employment.education = Educação,
+         employment.health = Saúde.Humana.e.Serviços.Sociais,
+         employment.artsSports = Artes..Cultura..Esporte.e.Recreação,
+         employment.otherServices= Outras.Atividades.de.Serviços,
+         employment.home = Serviços.Domésticos,
+         employment.international = Organismos.Internacionais.e.Outras.Instituições.Extraterritoriais,
+         employment.total = Total)
+#str(employment_sector)
+ 
+employment_sector <- employment_sector %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+  
+employment_sector <- employment_sector[,c(24,2:23)]
+#str(employment_sector)
+ 
+employment_sector <- employment_sector %>%
+   mutate(employment.agri.pct = employment.agri / employment.total,
+          employment.indExtractive.pct = employment.indExtractive / employment.total,
+          employment.indTransform.pct = employment.indTransform / employment.total,
+          employment.power.pct = employment.power / employment.total,
+          employment.waterSewage.pct = employment.waterSewage / employment.total,
+          employment.building.pct = employment.building / employment.total,
+          employment.trade.pct = employment.trade / employment.total,
+          employment.transport.pct = employment.transport / employment.total,
+          employment.foodLodging.pct = employment.foodLodging / employment.total,
+          employment.communication.pct = employment.communication / employment.total,
+          employment.finance.pct = employment.finance / employment.total,
+          employment.realState.pct = employment.realState / employment.total,
+          employment.professional.pct = employment.professional / employment.total,
+          employment.admin.pct = employment.admin / employment.total,
+          employment.public.pct = employment.public / employment.total,
+          employment.education.pct = employment.education / employment.total,
+          employment.health.pct = employment.health / employment.total,
+          employment.artsSports.pct = employment.artsSports / employment.total,
+          employment.otherServices.pct = employment.otherServices / employment.total,
+          employment.home.pct = employment.home / employment.total,
+          employment.international.pct = employment.international / employment.total)
+#str(employment_sector)
+     
+employment_sector <- employment_sector[,c(1, 24:44)]
+str(employment_sector)
+ 
+# Save cleaned data
+employment_sector %>%
+  write.csv("data_cleaned/db_econ_employment_sector.csv",row.names=FALSE)
+```
+
+## Companies, workers and salaries evolution
+
+Source: IBGE, Cadastro Central de Empresas, table 13, https://www.ibge.gov.br/estatisticas/economicas/comercio/2000-estatisticas-do-cadastro-central-de-empresas/9016-estatisticas-do-cadastro-central-de-empresas.html?=&t=resultados
+
+```{r}
+# Companies, salaries and workers (2018)
+companies2018 <- read_xlsx("data/IBGE/Cadastro Central de Empresas_Tabela 13-2018.xlsx") #local path of database
+#str(companies2018)
+a <- dim(companies2018)
+
+companies2018 <- companies2018[-c(1:32,5603:a[1]),c(2:10)]
+#str(companies2018)
+ 
+companies2018 <- companies2018 %>%
+  rename(city_UF = ...2,
+         companies.2018.qtde = ...3,
+         workers.2018.total = ...4,
+         workers.2018.hired = ...5,
+         salary.2018 = ...8,
+         companies.2018.qtdeActive = ...10)
+#str(companies2018)
+
+companies2018 <- companies2018[,-c(5,6,8)]
+#str(companies2018)
+
+companies2018 <- bind_cols(companies2018[,1], lapply(companies2018[,c(2:6)], as.numeric))
+#str(companies2018)
+    
+companies2018 <- companies2018 %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+#str(companies2018)
+ 
+companies2018 <- companies2018[,c(7,2:6)]
+str(companies2018)
+```
+
+```{r}
+# Companies, salaries and workers (2016)
+companies2016 <- read_xlsx("data/IBGE/Cadastro Central de Empresas_Tabela 13-2016.xlsx") #local path of database
+#str(companies2016)
+a <- dim(companies2016)
+
+companies2016 <- companies2016[-c(1:32,5603:a[1]),c(2:10)]
+#str(companies2016)
+ 
+companies2016 <- companies2016 %>%
+  rename(city_UF = ...2,
+         companies.2016.qtde = ...3,
+         workers.2016.total = ...4,
+         workers.2016.hired = ...5,
+         salary.2016 = ...8,
+         companies.2016.qtdeActive = ...10)
+#str(companies2016)
+
+companies2016 <- companies2016[,-c(5,6,8)]
+#str(companies2016)
+
+companies2016 <- bind_cols(companies2016[,1], lapply(companies2016[,c(2:6)], as.numeric))
+#str(companies2016)
+    
+companies2016 <- companies2016 %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux"))
+#str(companies2016)
+ 
+companies2016 <- companies2016[,c(7,2:6)]
+str(companies2016)
+ 
+```
+
+```{r}
+# Join companies data sets of 2018 and 2016
+companies <- left_join(companies2018, companies2016, by = "city_code") %>%
+  left_join(pop[,c("city_code","pop.2018","pop.2016")], by = "city_code")
+#str(companies)
+
+companies <- companies %>%
+  mutate(companies.2018.per100Khab = companies.2018.qtdeActive/pop.2018 * 100000,
+         companies.2016.per100Khab = companies.2016.qtdeActive/pop.2016 * 100000,
+         companies.growth.2016to18 = (companies.2018.per100Khab - companies.2016.per100Khab)/2,
+         workers.2018.pct = workers.2018.total/pop.2018,
+         workers.2016.pct = workers.2016.total/pop.2016,
+         workers.growth.2016to18 = (workers.2018.pct - workers.2016.pct)/2,
+         salary.growth.2016to18 = (salary.2018/salary.2016)^(1/2)-1)
+#str(companies)
+
+companies <- companies[,c("city_code",
+                          "companies.2018.per100Khab",
+                          "companies.growth.2016to18",
+                          "salary.2018",
+                          "salary.growth.2016to18",
+                          "workers.2018.pct",
+                          "workers.growth.2016to18")]
+str(companies)
+
+# Save cleaned data
+companies %>%
+  write.csv("data_cleaned/db_econ_companies.csv",row.names=FALSE)
+```
+
+## Beneficiaries of the 'Bolsa Família' program 
+
+Source: Dados.gov (2019), https://dados.gov.br/dataset/bolsa-familia-misocial
+
+```{r}
+# Beneficiaries of Bolsa Familia in 2019 (federal financial allowance for poor families)
+bolsa_familia <- read_xlsx("data/Dados.gov/BolsaFamilia-2019.xlsx") #local path of database
+#str(bolsa_familia)
+a <- dim(bolsa_familia)
+
+bolsa_familia <- bolsa_familia %>%
+  rename(city_code6 = ibge,
+         year_month = anomes,
+         bolsa.familia_families = qtd_familias_beneficiarias_bolsa_familia,
+         bolsa.familia_value= valor_repassado_bolsa_familia) %>%
+  filter(year_month == "201912")
+#str(bolsa_familia)
+
+# Match with city codes
+bolsa_familia <- bolsa_familia %>%
+  left_join(names_code6.final, by = "city_code6")
+#str(bolsa_familia)
+
+bolsa_familia <- bolsa_familia[,c(5,3,4)]
+#str(bolsa_familia)
+
+# Match with population data set
+bolsa_familia <- bolsa_familia %>%
+  left_join(pop[,c("city_code","pop.2019")], by = "city_code") %>%
+    mutate(bolsa.familia_familiesPer100Khab = bolsa.familia_families / pop.2019 * 100000) %>%
+      mutate(bolsa.familia_valuePerHab = bolsa.familia_value / pop.2019)
+#str(bolsa_familia)
+
+bolsa_familia <- bolsa_familia[,c(1,5,6)]
+str(bolsa_familia)
+
+sum(is.na(bolsa_familia))
+
+# Save cleaned data
+bolsa_familia %>%
+  write.csv("data_cleaned/db_econ_bolsa_familia.csv",row.names=FALSE)
+```
+
+# Health data
+
+## Hospital beds
+
+Source: TabNet, http://tabnet.datasus.gov.br/cgi/deftohtm.exe?cnes/cnv/leiintbr.def
+
+```{r}
+# Number of hospital beds (2019-21)
+hosp_beds <- read.csv("data/TabNet/CNES_leitosInternacao2019-21.csv", sep =";", skip=3 , header = T) #local path of database
+#str(hosp_beds)
+a <- dim(hosp_beds)
+
+# Select data rows
+end <- which(hosp_beds[,1] == "530010 Brasília") 
+hosp_beds <- hosp_beds[-c((end+1):a[1]),]
+
+# Select data columns  
+hosp_beds <- hosp_beds %>%
+  select(Município, X2019.Mar, X2020.Mar, X2021.Mar) %>%
+    rename(hosp_beds.2019 = X2019.Mar,
+           hosp_beds.2020 = X2020.Mar,
+           hosp_beds.2021 = X2021.Mar)
+
+
+# Match with city codes
+hosp_beds <- hosp_beds %>%
+  mutate(city_code6 = substr(Município,1,6)) %>%
+  select(-Município)
+
+hosp_beds[ hosp_beds == "-" ] <- "0"
+
+hosp_beds <- data.frame(lapply(hosp_beds, as.numeric))
+
+hosp_beds <- hosp_beds %>%
+  left_join(names_aux7, by = "city_code6")
+
+hosp_beds <- hosp_beds[,c(5,1:3)]
+
+
+# Calculate beds per capita
+hosp_beds <- hosp_beds %>%
+  left_join(pop, by = "city_code") %>%
+    mutate(hosp_beds.2021.per100Khab = hosp_beds.2021/pop.2020 * 100000, #assuming pop 2021 = pop 2021
+           hosp_beds.2020.per100Khab = hosp_beds.2020/pop.2020 * 100000,
+           hosp_beds.2019.per100Khab = hosp_beds.2019/pop.2019 * 100000)
+#str(hosp_beds)
+#sum(is.na(hosp_beds))
+
+
+# Calculate growth
+hosp_beds <- hosp_beds %>%
+  mutate(hosp_beds.growth.2019to20 = hosp_beds.2020.per100Khab - hosp_beds.2019.per100Khab,
+         hosp_beds.growth.2020to21 = hosp_beds.2021.per100Khab - hosp_beds.2020.per100Khab)
+#str(hosp_beds)
+
+# Select relevant variables
+hosp_beds <- hosp_beds %>%
+  select(city_code,
+         hosp_beds.2019.per100Khab,
+         hosp_beds.2020.per100Khab,
+         hosp_beds.2021.per100Khab,
+         hosp_beds.growth.2019to20,
+         hosp_beds.growth.2020to21)
+str(hosp_beds)
+
+# Save cleaned data
+hosp_beds %>%
+  write.csv("data_cleaned/db_hosp_beds.csv",row.names=FALSE)
+```
+
+## Specialty beds
+
+Source: TabNet, http://www2.datasus.gov.br/DATASUS/index.php?area=0204&id=1479586&VObj=http://tabnet.datasus.gov.br/cgi/deftohtm.exe?cnes/cnv/leiuti
+
+```{r}
+## PRIVATE BEDS, March/20 data ##
+
+# Number of beds by specialty  needed
+spec_beds2020_priv <- read.csv("data/TabNet/CNES_leitosComplementares_03-2020_naoSUS.csv", sep =";", skip=3 , header = T) #local path of database
+str(spec_beds2020_priv)
+a <- dim(spec_beds2020_priv)
+
+# Select data rows
+end <- which(spec_beds2020_priv[,1] == "530010 Brasília") 
+spec_beds2020_priv <- spec_beds2020_priv[-c((end+1):a[1]),]
+#str(spec_beds2020_priv)
+
+# Select data columns
+spec_beds2020_priv <- spec_beds2020_priv %>%
+  rename(beds.priv.2020_ICU.adult2.covid = UTI.adulto.II.COVID.19,
+         beds.priv.2020_ICU.child2.covid = UTI.pediátrica.II.COVID.19,
+         beds.priv.2020_insulation.unit = Unidade.isolamento,
+         beds.priv.2020_ICU.adult1 = UTI.adulto.I,
+         beds.priv.2020_ICU.adult2 = UTI.adulto.II,
+         beds.priv.2020_ICU.adult3 = UTI.adulto.III,
+         beds.priv.2020_intermed.care.adult = Unidade.de.cuidados.intermed.adulto,
+         beds.priv.2020_specialty.total = Total) %>%
+    select(Município,
+           beds.priv.2020_ICU.adult2.covid,
+           beds.priv.2020_ICU.child2.covid,
+           beds.priv.2020_insulation.unit,
+           beds.priv.2020_ICU.adult1,
+           beds.priv.2020_ICU.adult2,
+           beds.priv.2020_ICU.adult3,
+           beds.priv.2020_intermed.care.adult,
+           beds.priv.2020_specialty.total)
+ 
+# Match with city codes
+spec_beds2020_priv <- spec_beds2020_priv %>%
+  mutate(city_code6 = substr(Município,1,6)) %>%
+  select(-Município)
+
+spec_beds2020_priv[ spec_beds2020_priv == "-" ] <- "0"
+ 
+spec_beds2020_priv <- data.frame(lapply(spec_beds2020_priv, as.numeric))
+
+spec_beds2020_priv <- spec_beds2020_priv %>%
+  left_join(names_aux7, by = "city_code6")
+
+# Calculate beds per capita
+spec_beds2020_priv <- spec_beds2020_priv %>%
+  left_join(pop, by = "city_code") %>%
+    mutate(beds.priv.per100Khab.2020_ICU.adult2.covid = beds.priv.2020_ICU.adult2.covid / pop.2020 * 100000,
+           beds.priv.per100Khab.2020_ICU.child2.covid = beds.priv.2020_ICU.child2.covid / pop.2020 * 100000,
+           beds.priv.per100Khab.2020_insulation.unit = beds.priv.2020_insulation.unit / pop.2020 * 100000,
+           beds.priv.per100Khab.2020_ICU.adult1 = beds.priv.2020_ICU.adult1 / pop.2020 * 100000,
+           beds.priv.per100Khab.2020_ICU.adult2 = beds.priv.2020_ICU.adult2 / pop.2020 * 100000,
+           beds.priv.per100Khab.2020_ICU.adult3 = beds.priv.2020_ICU.adult3 / pop.2020 * 100000,
+           beds.priv.per100Khab.2020_intermed.care.adult = beds.priv.2020_intermed.care.adult / pop.2020 * 100000,
+           beds.priv.per100Khab.2020_specialty.total = beds.priv.2020_specialty.total / pop.2020 * 100000)
+#str(spec_beds2020_priv)
+
+spec_beds2020_priv <- spec_beds2020_priv[,c(10,22:29)]
+str(spec_beds2020_priv)
+```
+
+```{r}
+## PUBLIC BEDS, March/20 data ##
+
+# Number of beds by specialty  needed
+spec_beds2020_publ <- read.csv("data/TabNet/CNES_leitosComplementares_03-2020_SUS.csv", sep =";", skip=3 , header = T) #local path of database
+str(spec_beds2020_publ)
+a <- dim(spec_beds2020_publ)
+
+# Select data rows
+end <- which(spec_beds2020_publ[,1] == "530010 Brasília") 
+spec_beds2020_publ <- spec_beds2020_publ[-c((end+1):a[1]),]
+#str(spec_beds2020_publ)
+
+# Select data columns
+spec_beds2020_publ <- spec_beds2020_publ %>%
+  rename(beds.publ.2020_insulation.unit = Unidade.isolamento,
+         beds.publ.2020_ICU.adult1 = UTI.adulto.I,
+         beds.publ.2020_ICU.adult2 = UTI.adulto.II,
+         beds.publ.2020_ICU.adult3 = UTI.adulto.III,
+         beds.publ.2020_intermed.care.adult = Unidade.de.cuidados.intermed.adulto,
+         beds.publ.2020_specialty.total = Total) %>%
+    select(Município,
+           beds.publ.2020_insulation.unit,
+           beds.publ.2020_ICU.adult1,
+           beds.publ.2020_ICU.adult2,
+           beds.publ.2020_ICU.adult3,
+           beds.publ.2020_intermed.care.adult,
+           beds.publ.2020_specialty.total)
+ 
+# Match with city codes
+spec_beds2020_publ <- spec_beds2020_publ %>%
+  mutate(city_code6 = substr(Município,1,6)) %>%
+  select(-Município)
+
+spec_beds2020_publ[ spec_beds2020_publ == "-" ] <- "0"
+ 
+spec_beds2020_publ <- data.frame(lapply(spec_beds2020_publ, as.numeric))
+
+spec_beds2020_publ <- spec_beds2020_publ %>%
+  left_join(names_aux7, by = "city_code6")
+str(spec_beds2020_publ)
+
+# Calculate beds per capita
+spec_beds2020_publ <- spec_beds2020_publ %>%
+  left_join(pop, by = "city_code") %>%
+    mutate(beds.publ.per100Khab.2020_insulation.unit = beds.publ.2020_insulation.unit / pop.2020 * 100000,
+           beds.publ.per100Khab.2020_ICU.adult1 = beds.publ.2020_ICU.adult1 / pop.2020 * 100000,
+           beds.publ.per100Khab.2020_ICU.adult2 = beds.publ.2020_ICU.adult2 / pop.2020 * 100000,
+           beds.publ.per100Khab.2020_ICU.adult3 = beds.publ.2020_ICU.adult3 / pop.2020 * 100000,
+           beds.publ.per100Khab.2020_intermed.care.adult = beds.publ.2020_intermed.care.adult / pop.2020 * 100000,
+           beds.publ.per100Khab.2020_specialty.total = beds.publ.2020_specialty.total / pop.2020 * 100000)
+#str(spec_beds2020_publ)
+
+spec_beds2020_publ <- spec_beds2020_publ[,c(8,20:25)]
+str(spec_beds2020_publ)
+```
+
+```{r}
+## TOTAL (PRIVATE + PUBLIC) BEDS, March/20 data ##
+
+# Number of beds by specialty  needed
+spec_beds2020_total <- read.csv("data/TabNet/CNES_leitosComplementares_03-2020.csv", sep =";", skip=3 , header = T) #local path of database
+str(spec_beds2020_total)
+a <- dim(spec_beds2020_total)
+
+# Select data rows
+end <- which(spec_beds2020_total[,1] == "530010 Brasília") 
+spec_beds2020_total <- spec_beds2020_total[-c((end+1):a[1]),]
+#str(spec_beds2020_total)
+
+# Select data columns
+spec_beds2020_total <- spec_beds2020_total %>%
+  rename(beds.total.2020_ICU.adult2.covid = UTI.adulto.II.COVID.19,
+         beds.total.2020_ICU.child2.covid = UTI.pediátrica.II.COVID.19,
+         beds.total.2020_insulation.unit = Unidade.isolamento,
+         beds.total.2020_ICU.adult1 = UTI.adulto.I,
+         beds.total.2020_ICU.adult2 = UTI.adulto.II,
+         beds.total.2020_ICU.adult3 = UTI.adulto.III,
+         beds.total.2020_intermed.care.adult = Unidade.de.cuidados.intermed.adulto,
+         beds.total.2020_specialty.total = Total) %>%
+    select(Município,
+           beds.total.2020_ICU.adult2.covid,
+           beds.total.2020_ICU.child2.covid,
+           beds.total.2020_insulation.unit,
+           beds.total.2020_ICU.adult1,
+           beds.total.2020_ICU.adult2,
+           beds.total.2020_ICU.adult3,
+           beds.total.2020_intermed.care.adult,
+           beds.total.2020_specialty.total)
+ 
+# Match with city codes
+spec_beds2020_total <- spec_beds2020_total %>%
+  mutate(city_code6 = substr(Município,1,6)) %>%
+  select(-Município)
+
+spec_beds2020_total[ spec_beds2020_total == "-" ] <- "0"
+ 
+spec_beds2020_total <- data.frame(lapply(spec_beds2020_total, as.numeric))
+
+spec_beds2020_total <- spec_beds2020_total %>%
+  left_join(names_aux7, by = "city_code6")
+
+# Calculate beds per capita
+spec_beds2020_total <- spec_beds2020_total %>%
+  left_join(pop, by = "city_code") %>%
+    mutate(beds.total.per100Khab.2020_ICU.adult2.covid = beds.total.2020_ICU.adult2.covid / pop.2020 * 100000,
+           beds.total.per100Khab.2020_ICU.child2.covid = beds.total.2020_ICU.child2.covid / pop.2020 * 100000,
+           beds.total.per100Khab.2020_insulation.unit = beds.total.2020_insulation.unit / pop.2020 * 100000,
+           beds.total.per100Khab.2020_ICU.adult1 = beds.total.2020_ICU.adult1 / pop.2020 * 100000,
+           beds.total.per100Khab.2020_ICU.adult2 = beds.total.2020_ICU.adult2 / pop.2020 * 100000,
+           beds.total.per100Khab.2020_ICU.adult3 = beds.total.2020_ICU.adult3 / pop.2020 * 100000,
+           beds.total.per100Khab.2020_intermed.care.adult = beds.total.2020_intermed.care.adult / pop.2020 * 100000,
+           beds.total.per100Khab.2020_specialty.total = beds.total.2020_specialty.total / pop.2020 * 100000)
+#str(spec_beds2020_total)
+
+spec_beds2020_total <- spec_beds2020_total[,c(10,22:29)]
+str(spec_beds2020_total)
+```
+
+```{r}
+## PRIVATE BEDS, March/21 data ##
+
+# Number of beds by specialty  needed
+spec_beds2021_priv <- read.csv("data/TabNet/CNES_leitosComplementares_03-2021_naoSUS.csv", sep =";", skip=4 , header = T) #local path of database
+str(spec_beds2021_priv)
+a <- dim(spec_beds2021_priv)
+
+# Select data rows
+end <- which(spec_beds2021_priv[,1] == "530010 Brasília") 
+spec_beds2021_priv <- spec_beds2021_priv[-c((end+1):a[1]),]
+#str(spec_beds2021_priv)
+
+# Select data columns
+spec_beds2021_priv <- spec_beds2021_priv %>%
+  rename(beds.priv.2021_ICU.adult2.covid = UTI.adulto.II.COVID.19,
+         beds.priv.2021_ICU.child2.covid = UTI.pediátrica.II.COVID.19,
+         beds.priv.2021_insulation.unit = Unidade.isolamento,
+         beds.priv.2021_ICU.adult1 = UTI.adulto.I,
+         beds.priv.2021_ICU.adult2 = UTI.adulto.II,
+         beds.priv.2021_ICU.adult3 = UTI.adulto.III,
+         beds.priv.2021_intermed.care.adult = Unidade.de.cuidados.intermed.adulto,
+         beds.priv.2021_resp.support.covid = Suporte.Ventilatorio.Pulmonar.COVID.19,
+         beds.priv.2021_specialty.total = Total) %>%
+    select(Município,
+           beds.priv.2021_ICU.adult2.covid,
+           beds.priv.2021_ICU.child2.covid,
+           beds.priv.2021_insulation.unit,
+           beds.priv.2021_ICU.adult1,
+           beds.priv.2021_ICU.adult2,
+           beds.priv.2021_ICU.adult3,
+           beds.priv.2021_intermed.care.adult,
+           beds.priv.2021_resp.support.covid,
+           beds.priv.2021_specialty.total)
+ 
+# Match with city codes
+spec_beds2021_priv <- spec_beds2021_priv %>%
+  mutate(city_code6 = substr(Município,1,6)) %>%
+  select(-Município)
+
+spec_beds2021_priv[ spec_beds2021_priv == "-" ] <- "0"
+ 
+spec_beds2021_priv <- data.frame(lapply(spec_beds2021_priv, as.numeric))
+
+spec_beds2021_priv <- spec_beds2021_priv %>%
+  left_join(names_aux7, by = "city_code6")
+
+# Calculate beds per capita
+spec_beds2021_priv <- spec_beds2021_priv %>%
+  left_join(pop, by = "city_code") %>%
+    mutate(beds.priv.per100Khab.2021_ICU.adult2.covid = beds.priv.2021_ICU.adult2.covid / pop.2020 * 100000, #assuming pop 2021 = pop 2020
+           beds.priv.per100Khab.2021_ICU.child2.covid = beds.priv.2021_ICU.child2.covid / pop.2020 * 100000,
+           beds.priv.per100Khab.2021_insulation.unit = beds.priv.2021_insulation.unit / pop.2020 * 100000,
+           beds.priv.per100Khab.2021_ICU.adult1 = beds.priv.2021_ICU.adult1 / pop.2020 * 100000,
+           beds.priv.per100Khab.2021_ICU.adult2 = beds.priv.2021_ICU.adult2 / pop.2020 * 100000,
+           beds.priv.per100Khab.2021_ICU.adult3 = beds.priv.2021_ICU.adult3 / pop.2020 * 100000,
+           beds.priv.per100Khab.2021_intermed.care.adult = beds.priv.2021_intermed.care.adult / pop.2020 * 100000,
+           beds.priv.per100Khab.2021_resp.support.covid = beds.priv.2021_resp.support.covid / pop.2020 * 100000,
+           beds.priv.per100Khab.2021_specialty.total = beds.priv.2021_specialty.total / pop.2020 * 100000)
+#str(spec_beds2021_priv)
+
+spec_beds2021_priv <- spec_beds2021_priv[,c(11,23:31)]
+str(spec_beds2021_priv)
+```
+
+```{r}
+## PUBLIC BEDS, March/21 data ##
+
+# Number of beds by specialty  needed
+spec_beds2021_publ <- read.csv("data/TabNet/CNES_leitosComplementares_03-2021_SUS.csv", sep =";", skip=3 , header = T) #local path of database
+str(spec_beds2021_publ)
+a <- dim(spec_beds2021_publ)
+
+# Select data rows
+end <- which(spec_beds2021_publ[,1] == "530010 Brasília") 
+spec_beds2021_publ <- spec_beds2021_publ[-c((end+1):a[1]),]
+#str(spec_beds2021_publ)
+
+# Select data columns
+spec_beds2021_publ <- spec_beds2021_publ %>%
+  rename(beds.publ.2021_ICU.adult2.covid = UTI.adulto.II.COVID.19,
+         beds.publ.2021_ICU.child2.covid = UTI.pediátrica.II.COVID.19,
+         beds.publ.2021_insulation.unit = Unidade.isolamento,
+         beds.publ.2021_ICU.adult1 = UTI.adulto.I,
+         beds.publ.2021_ICU.adult2 = UTI.adulto.II,
+         beds.publ.2021_ICU.adult3 = UTI.adulto.III,
+         beds.publ.2021_intermed.care.adult = Unidade.de.cuidados.intermed.adulto,
+         beds.publ.2021_resp.support.covid = Suporte.Ventilatorio.Pulmonar.COVID.19,
+         beds.publ.2021_specialty.total = Total) %>%
+    select(Município,
+           beds.publ.2021_ICU.adult2.covid,
+           beds.publ.2021_ICU.child2.covid,
+           beds.publ.2021_insulation.unit,
+           beds.publ.2021_ICU.adult1,
+           beds.publ.2021_ICU.adult2,
+           beds.publ.2021_ICU.adult3,
+           beds.publ.2021_intermed.care.adult,
+           beds.publ.2021_resp.support.covid,
+           beds.publ.2021_specialty.total)
+ 
+# Match with city codes
+spec_beds2021_publ <- spec_beds2021_publ %>%
+  mutate(city_code6 = substr(Município,1,6)) %>%
+  select(-Município)
+
+spec_beds2021_publ[ spec_beds2021_publ == "-" ] <- "0"
+ 
+spec_beds2021_publ <- data.frame(lapply(spec_beds2021_publ, as.numeric))
+
+spec_beds2021_publ <- spec_beds2021_publ %>%
+  left_join(names_aux7, by = "city_code6")
+#str(spec_beds2021_publ)
+
+# Calculate beds per capita
+spec_beds2021_publ <- spec_beds2021_publ %>%
+  left_join(pop, by = "city_code") %>%
+    mutate(beds.publ.per100Khab.2021_ICU.adult2.covid = beds.publ.2021_ICU.adult2.covid / pop.2020 * 100000, #assuming pop 2021 = pop 2020
+           beds.publ.per100Khab.2021_ICU.child2.covid = beds.publ.2021_ICU.child2.covid / pop.2020 * 100000,
+           beds.publ.per100Khab.2021_insulation.unit = beds.publ.2021_insulation.unit / pop.2020 * 100000,
+           beds.publ.per100Khab.2021_ICU.adult1 = beds.publ.2021_ICU.adult1 / pop.2020 * 100000,
+           beds.publ.per100Khab.2021_ICU.adult2 = beds.publ.2021_ICU.adult2 / pop.2020 * 100000,
+           beds.publ.per100Khab.2021_ICU.adult3 = beds.publ.2021_ICU.adult3 / pop.2020 * 100000,
+           beds.publ.per100Khab.2021_intermed.care.adult = beds.publ.2021_intermed.care.adult / pop.2020 * 100000,
+           beds.publ.per100Khab.2021_resp.support.covid = beds.publ.2021_resp.support.covid / pop.2020 * 100000,
+           beds.publ.per100Khab.2021_specialty.total = beds.publ.2021_specialty.total / pop.2020 * 100000)
+#str(spec_beds2021_publ)
+
+spec_beds2021_publ <- spec_beds2021_publ[,c(11,23:31)]
+str(spec_beds2021_publ)
+```
+
+```{r}
+## TOTAL (PRIVATE + PUBLIC) BEDS, March/21 data ##
+
+# Number of beds by specialty  needed
+spec_beds2021_total <- read.csv("data/TabNet/CNES_leitosComplementares_03-2021.csv", sep =";", skip=3 , header = T) #local path of database
+str(spec_beds2021_total)
+a <- dim(spec_beds2021_total)
+
+# Select data rows
+end <- which(spec_beds2021_total[,1] == "530010 Brasília") 
+spec_beds2021_total <- spec_beds2021_total[-c((end+1):a[1]),]
+#str(spec_beds2021_total)
+
+# Select data columns
+spec_beds2021_total <- spec_beds2021_total %>%
+  rename(beds.total.2021_ICU.adult2.covid = UTI.adulto.II.COVID.19,
+         beds.total.2021_ICU.child2.covid = UTI.pediátrica.II.COVID.19,
+         beds.total.2021_insulation.unit = Unidade.isolamento,
+         beds.total.2021_ICU.adult1 = UTI.adulto.I,
+         beds.total.2021_ICU.adult2 = UTI.adulto.II,
+         beds.total.2021_ICU.adult3 = UTI.adulto.III,
+         beds.total.2021_intermed.care.adult = Unidade.de.cuidados.intermed.adulto,
+         beds.total.2021_resp.support.covid = Suporte.Ventilatorio.Pulmonar.COVID.19,
+         beds.total.2021_specialty.total = Total) %>%
+    select(Município,
+           beds.total.2021_ICU.adult2.covid,
+           beds.total.2021_ICU.child2.covid,
+           beds.total.2021_insulation.unit,
+           beds.total.2021_ICU.adult1,
+           beds.total.2021_ICU.adult2,
+           beds.total.2021_ICU.adult3,
+           beds.total.2021_intermed.care.adult,
+           beds.total.2021_resp.support.covid,
+           beds.total.2021_specialty.total)
+ 
+# Match with city codes
+spec_beds2021_total <- spec_beds2021_total %>%
+  mutate(city_code6 = substr(Município,1,6)) %>%
+  select(-Município)
+
+spec_beds2021_total[ spec_beds2021_total == "-" ] <- "0"
+ 
+spec_beds2021_total <- data.frame(lapply(spec_beds2021_total, as.numeric))
+
+spec_beds2021_total <- spec_beds2021_total %>%
+  left_join(names_aux7, by = "city_code6")
+
+# Calculate beds per capita
+spec_beds2021_total <- spec_beds2021_total %>%
+  left_join(pop, by = "city_code") %>%
+    mutate(beds.total.per100Khab.2021_ICU.adult2.covid = beds.total.2021_ICU.adult2.covid / pop.2020 * 100000, #assuming pop 2021 = pop 2020
+           beds.total.per100Khab.2021_ICU.child2.covid = beds.total.2021_ICU.child2.covid / pop.2020 * 100000,
+           beds.total.per100Khab.2021_insulation.unit = beds.total.2021_insulation.unit / pop.2020 * 100000,
+           beds.total.per100Khab.2021_ICU.adult1 = beds.total.2021_ICU.adult1 / pop.2020 * 100000,
+           beds.total.per100Khab.2021_ICU.adult2 = beds.total.2021_ICU.adult2 / pop.2020 * 100000,
+           beds.total.per100Khab.2021_ICU.adult3 = beds.total.2021_ICU.adult3 / pop.2020 * 100000,
+           beds.total.per100Khab.2021_intermed.care.adult = beds.total.2021_intermed.care.adult / pop.2020 * 100000,
+           beds.total.per100Khab.2021_resp.support.covid = beds.total.2021_resp.support.covid / pop.2020 * 100000,
+           beds.total.per100Khab.2021_specialty.total = beds.total.2021_specialty.total / pop.2020 * 100000)
+#str(spec_beds2021_total)
+
+spec_beds2021_total <- spec_beds2021_total[,c(11,23:31)]
+str(spec_beds2021_total)
+
+sum(is.na(spec_beds2021_total))
+```
+
+```{r}
+# Join all specialty beds data sets (public, private, total, March/20 and March/21 )
+
+# Total beds
+# sum(is.na(spec_beds2021_total))
+# sum(is.na(spec_beds2020_total))
+# anti_join(spec_beds2020_total, spec_beds2021_total, by = "city_code") # cities of 2020 with zero bed in 2021
+
+spec_beds_total <- spec_beds2021_total %>%
+  full_join(spec_beds2020_total, by = "city_code") 
+sum(is.na(spec_beds_total))
+
+# Private beds
+# sum(is.na(spec_beds2021_priv))
+# sum(is.na(spec_beds2020_priv))
+# anti_join(spec_beds2020_priv, spec_beds2021_priv, by = "city_code") # cities of 2020 with zero bed in 2021
+
+spec_beds_priv <- spec_beds2021_priv %>%
+  full_join(spec_beds2020_priv, by = "city_code") 
+sum(is.na(spec_beds_priv))
+
+# Public beds
+# sum(is.na(spec_beds2021_publ))
+# sum(is.na(spec_beds2020_publ))
+# anti_join(spec_beds2020_publ, spec_beds2021_publ, by = "city_code") # cities of 2020 with zero bed in 2021
+
+spec_beds_publ <- spec_beds2021_publ %>%
+  full_join(spec_beds2020_publ, by = "city_code") 
+sum(is.na(spec_beds_publ))
+
+# All beds
+spec_beds <- spec_beds_total %>%
+  full_join(spec_beds_priv, by = "city_code") %>%
+    full_join(spec_beds_publ, by = "city_code")
+sum(is.na(spec_beds))
+
+# Replace NA values by 0
+spec_beds[ is.na(spec_beds)] <- 0
+#str(spec_beds)
+sum(is.na(spec_beds))
+
+# Calculate growth of the number of beds
+spec_beds <- spec_beds %>%
+  mutate(beds.total.growth20to21_ICU.adult2.covid = beds.total.per100Khab.2021_ICU.adult2.covid - beds.total.per100Khab.2020_ICU.adult2.covid,
+         beds.total.growth20to21_ICU.child2.covid = beds.total.per100Khab.2021_ICU.child2.covid - beds.total.per100Khab.2020_ICU.child2.covid,
+         beds.total.growth20to21_insulation.unit = beds.total.per100Khab.2021_insulation.unit  - beds.total.per100Khab.2020_insulation.unit,
+         beds.total.growth20to21_ICU.adult1 = beds.total.per100Khab.2021_ICU.adult1 - beds.total.per100Khab.2020_ICU.adult1,
+         beds.total.growth20to21_ICU.adult2 = beds.total.per100Khab.2021_ICU.adult2 - beds.total.per100Khab.2020_ICU.adult2,
+         beds.total.growth20to21_ICU.adult3 = beds.total.per100Khab.2021_ICU.adult3 - beds.total.per100Khab.2020_ICU.adult3,
+         beds.total.growth20to21_intermed.care.adult = beds.total.per100Khab.2021_intermed.care.adult - beds.total.per100Khab.2020_intermed.care.adult,
+         beds.total.growth20to21_resp.support.covid = beds.total.per100Khab.2021_resp.support.covid,
+         beds.total.growth20to21_specialty.total = beds.total.per100Khab.2021_specialty.total - beds.total.per100Khab.2020_specialty.total,
+         
+         beds.priv.growth20to21_ICU.adult2.covid = beds.priv.per100Khab.2021_ICU.adult2.covid - beds.priv.per100Khab.2020_ICU.adult2.covid,
+         beds.priv.growth20to21_ICU.child2.covid = beds.priv.per100Khab.2021_ICU.child2.covid - beds.priv.per100Khab.2020_ICU.child2.covid,
+         beds.priv.growth20to21_insulation.unit = beds.priv.per100Khab.2021_insulation.unit  - beds.priv.per100Khab.2020_insulation.unit,
+         beds.priv.growth20to21_ICU.adult1 = beds.priv.per100Khab.2021_ICU.adult1 - beds.priv.per100Khab.2020_ICU.adult1,
+         beds.priv.growth20to21_ICU.adult2 = beds.priv.per100Khab.2021_ICU.adult2 - beds.priv.per100Khab.2020_ICU.adult2,
+         beds.priv.growth20to21_ICU.adult3 = beds.priv.per100Khab.2021_ICU.adult3 - beds.priv.per100Khab.2020_ICU.adult3,
+         beds.priv.growth20to21_intermed.care.adult = beds.priv.per100Khab.2021_intermed.care.adult - beds.priv.per100Khab.2020_intermed.care.adult,
+         beds.priv.growth20to21_resp.support.covid = beds.priv.per100Khab.2021_resp.support.covid,
+         beds.priv.growth20to21_specialty.total = beds.priv.per100Khab.2021_specialty.total - beds.priv.per100Khab.2020_specialty.total,
+         
+         beds.publ.growth20to21_ICU.adult2.covid = beds.publ.per100Khab.2021_ICU.adult2.covid,
+         beds.publ.growth20to21_ICU.child2.covid = beds.publ.per100Khab.2021_ICU.child2.covid,
+         beds.publ.growth20to21_insulation.unit = beds.publ.per100Khab.2021_insulation.unit  - beds.publ.per100Khab.2020_insulation.unit,
+         beds.publ.growth20to21_ICU.adult1 = beds.publ.per100Khab.2021_ICU.adult1 - beds.publ.per100Khab.2020_ICU.adult1,
+         beds.publ.growth20to21_ICU.adult2 = beds.publ.per100Khab.2021_ICU.adult2 - beds.publ.per100Khab.2020_ICU.adult2,
+         beds.publ.growth20to21_ICU.adult3 = beds.publ.per100Khab.2021_ICU.adult3 - beds.publ.per100Khab.2020_ICU.adult3,
+         beds.publ.growth20to21_intermed.care.adult = beds.publ.per100Khab.2021_intermed.care.adult - beds.publ.per100Khab.2020_intermed.care.adult,
+         beds.publ.growth20to21_resp.support.covid = beds.publ.per100Khab.2021_resp.support.covid,
+         beds.publ.growth20to21_specialty.total = beds.publ.per100Khab.2021_specialty.total - beds.publ.per100Khab.2020_specialty.total)
+#str(spec_beds)
+
+spec_beds <- spec_beds[,c(1,2:10,51:59,19:27,60:68,36:44,69:77)] 
+str(spec_beds)
+sum(is.na(spec_beds))
+
+# Save cleaned data
+spec_beds %>%
+  write.csv("data_cleaned/db_spec_beds.csv",row.names=FALSE)
+
+```
+
+\pagebreak
+
+# Covid data
+
+## Deaths and cases
+
+Source: https://brasil.io/dataset/covid19/caso_full/
+
+```{r}
+covid <- read.csv("data/Brasil.io/caso_full.csv") #local path of database
+
+covid$date <- as.Date(covid$date, "%Y-%m-%d")
+str(covid) 
+```
+
+```{r, warning=FALSE}
+# Find last day of complete data for all cities
+last <- covid %>% 
+  filter(place_type == "city") %>%
+    filter(is_last == "True" ) %>%
+      group_by(city_ibge_code) %>%
+      summarise(last_day_available = date) 
+
+#min(covid$date)
+
+last_day <- min(last$last_day_available)
+```
+
+```{r}
+# Calculate evolution of cases and deaths until last day of available date
+covid_evo <- covid %>% 
+ filter(place_type == "city") %>%
+  filter(city_ibge_code != "") %>% 
+    filter(date <= last_day) %>%
+      select(city_ibge_code, date, new_confirmed, new_deaths) %>%
+       group_by(city_ibge_code,date) %>%
+          arrange(city_ibge_code)
+
+# Calculate cases and deaths per 100k inhabitants
+covid_evo <- covid_evo %>%
+  left_join(pop[,c("city_code","pop.2020")], by = c("city_ibge_code" = "city_code")) %>%
+    mutate(newcases_per100K = new_confirmed / pop.2020 * 100000,
+           newdeaths_per100K = new_deaths / pop.2020 * 100000) %>%
+      select(city_ibge_code, new_confirmed, new_deaths, newcases_per100K, newdeaths_per100K)
+
+sum(is.na(covid_evo)) #check if there is any missing cities
+
+covid_evo <- covid_evo %>%
+  rename(city_code = city_ibge_code)
+#str(covid_evo)
+
+# Save cleaned data
+covid_evo %>%
+  write.csv("data_cleaned/db_covid_evo.csv",row.names=FALSE)
+```
+
+```{r}
+# Calculate cumulative cases and deaths until last day of available date
+covid_cumulative <- covid %>% 
+ filter(place_type == "city") %>%
+  filter(city_ibge_code != "") %>% 
+    filter(date <= last_day) %>%
+       group_by(city_ibge_code) %>%
+       summarise(cases = sum(new_confirmed), deaths = sum(new_deaths)) %>%
+       arrange(city_ibge_code)
+#str(covid_cumulative)
+
+# Calculate cases and deaths per 100k inhabitants
+covid_cumulative <- covid_cumulative %>%
+  left_join(pop[,c("city_code","pop.2020")], by = c("city_ibge_code" = "city_code")) %>%
+    mutate(cases_per100K = cases / pop.2020 * 100000,
+           deaths_per100K = deaths / pop.2020 * 100000) %>%
+      select(city_ibge_code, cases, deaths, cases_per100K, deaths_per100K)
+
+sum(is.na(covid_cumulative))
+
+covid_cumulative <- covid_cumulative %>%
+  rename(city_code = city_ibge_code)
+str(covid_cumulative)
+
+# Save cleaned data
+covid_cumulative %>%
+  write.csv("data_cleaned/db_covid_cumulative.csv",row.names=FALSE)
+```
+
+## Covid ICU beds sponsored by the Federal Government
+
+Source: Localiza SUS, https://qsprod.saude.gov.br/extensions/DEMAS_C19Insumos_LEITOS_2021UTI/DEMAS_C19Insumos_LEITOS_2021UTI.html
+
+```{r}
+fed_covid_ICUbeds_data <- read.csv("data/Localiza_SUS/MS_Covid19_Leitos2021_19-04-21.csv", encoding = "UTF-8") #local path of database
+#str(fed_covid_ICUbeds_data)
+
+fed_covid_ICUbeds_data <- fed_covid_ICUbeds_data %>%
+  select(Município, UF, Ano, Autorizações.publicadas, Valor.autorizações) %>%
+  rename(PT_city = Município, Year = Ano, beds_authorized = Autorizações.publicadas, beds_authorized_cost = Valor.autorizações)
+str(fed_covid_ICUbeds_data)
+```
+
+```{r}
+covid_fed_ICUbeds <- fed_covid_ICUbeds_data %>%
+  filter(Year == 2021)%>%
+    mutate(city_UF = paste0(PT_city," (",UF,")")) %>%
+      group_by(city_UF)%>%
+      summarise(beds = sum(beds_authorized), beds_cost = sum(beds_authorized_cost))
+
+covid_fed_ICUbeds <- full_join(covid_fed_ICUbeds, names_aux, by = c("city_UF" = "PT_city_UF_aux")) %>%
+  group_by(city_code)%>%
+    summarise(beds = sum(beds), beds_cost = sum(beds_cost))
+#str(covid_fed_ICUbeds)
+
+# Replace NA values by 0
+sum(is.na(covid_fed_ICUbeds))
+covid_fed_ICUbeds[ is.na(covid_fed_ICUbeds)] <- 0
+sum(is.na(covid_fed_ICUbeds))
+
+# Calculate variables per 100k inhabitants or per capita
+covid_fed_ICUbeds <- covid_fed_ICUbeds %>%
+  left_join(pop[,c("city_code","pop.2020")], by = "city_code") %>%
+    mutate(covid.fed.ICUbeds.per100K = beds / pop.2020 * 100000,
+           covid.fed.ICUbeds.cost.percapita = beds_cost / pop.2020) %>%
+      select(city_code, covid.fed.ICUbeds.per100K, covid.fed.ICUbeds.cost.percapita)
+
+str(covid_fed_ICUbeds)
+
+# Save cleaned data
+covid_fed_ICUbeds %>%
+  write.csv("data_cleaned/db_covid_fed_ICUbeds.csv",row.names=FALSE)
+
+```
+
+## Government expenditure with COVID
+
+Source: Localiza SUS,  https://qsprod.saude.gov.br/extensions/DEMAS_C19SIOPS/DEMAS_C19SIOPS.html
+
+```{r}
+covid_spent_data <- read.csv("data/Localiza_SUS/MS_Covid19_Recursos_v2.csv", encoding = "UTF-8") #local path of database
+#str(covid_spent_data)
+
+covid_spent_data <- covid_spent_data %>%
+  mutate(city_UF = paste0(Município," (",UF,")")) %>%
+  select(city_UF, Origem, Ano, Período, Valor.Empenhado..R...1, Valor.Pago..R...1) %>%
+  rename(year = Ano, source = Origem, period = Período, 
+         amount_committed = Valor.Empenhado..R...1, amount_disbursed = Valor.Pago..R...1)
+str(covid_spent_data)
+```
+```{r}
+covid_spent <- covid_spent_data %>%
+  filter(year == "2020") %>%
+    group_by(city_UF, source) %>%
+    summarise(amount_committed=sum(amount_committed), amount_disbursed=sum(amount_disbursed)) %>%
+      pivot_wider(names_from = source, values_from = c(amount_committed, amount_disbursed)) 
+
+#str(covid_spent)
+
+covid_spent <- covid_spent %>%
+  rename(covid.expense.committed.fed = "amount_committed_Repasse Federal",
+         covid.expense.committed.city = "amount_committed_Recurso Próprio",
+         covid.expense.committed.state = "amount_committed_Repasse Estadual",
+         covid.expense.disbursed.fed = "amount_disbursed_Repasse Federal",
+         covid.expense.disbursed.city = "amount_disbursed_Recurso Próprio",
+         covid.expense.disbursed.state = "amount_disbursed_Repasse Estadual")
+
+# Match city with codes
+covid_spent <- covid_spent %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux")) %>%
+    right_join(names, by = "city_code")
+#str(covid_spent)
+covid_spent <- covid_spent[,c(8,2:7)]
+
+# Replace NA values by 0
+sum(is.na(covid_spent))
+covid_spent[ is.na(covid_spent)] <- 0
+sum(is.na(covid_spent))  
+
+# Calculate variables per 100k inhabitants or per capita
+covid_spent <- covid_spent %>% 
+  left_join(pop[,c("city_code","pop.2020")], by = "city_code") %>%
+    mutate(covid.percapita.committed.fed = covid.expense.committed.fed / pop.2020,
+           covid.percapita.committed.city = covid.expense.committed.city / pop.2020,
+           covid.percapita.committed.state = covid.expense.committed.state / pop.2020,
+           covid.percapita.disbursed.fed = covid.expense.disbursed.fed / pop.2020,
+           covid.percapita.disbursed.city = covid.expense.disbursed.city / pop.2020,
+           covid.percapita.disbursed.state = covid.expense.disbursed.state / pop.2020) %>%
+      arrange(city_code)
+covid_spent <- covid_spent[,c(1,9:14)]
+str(covid_spent)
+sum(is.na(covid_spent))  
+
+# Save cleaned data
+covid_spent %>%
+  write.csv("data_cleaned/db_covid_spent.csv",row.names=FALSE)
+
+```
+          
+## Vaccines
+
+Source: Localiza SUS, https://qsprod.saude.gov.br/extensions/DEMAS_C19Vacina/DEMAS_C19Vacina.html
+
+
+```{r}
+vaccines_data <- read.csv("data/Localiza_SUS/Vacinas aplicadas_19-04-21.csv", encoding = "UTF-8") #local path of database
+str(vaccines_data)
+
+vaccines_data  <- vaccines_data %>%
+  rename(city = X.U.FEFF..U.FEFF.Município) %>%
+  mutate(city_UF = paste0(city," (",UF,")")) %>%
+  select(city, UF, city_UF, Fabricante, Doses.Aplicadas, Dose.1, Dose.2) %>%
+  rename(vac_provider = Fabricante, vac_shots = Doses.Aplicadas, vac_dose1 = Dose.1, vac_dose2 = Dose.2) %>%
+  mutate(vac_provider = ifelse(vac_provider == "Vacina Adsorvida Covid-19 (Inativada) - Coronavac", "Coronavac", 
+                                   ifelse(vac_provider == "Vacina Covid-19 - Covishield", "Covishield.AZ", "Unknown")))
+str(vaccines_data)
+```
+
+```{r}
+covid_vaccines <- vaccines_data %>%
+  filter(UF != "-" & city != "-") %>%
+    select(city_UF, vac_provider, vac_shots, vac_dose1, vac_dose2) %>%
+      group_by(city_UF, vac_provider) %>%
+      summarise(vac_shots = sum(vac_shots), vac_dose1 = sum(vac_dose1), vac_dose2 = sum(vac_dose2)) %>%
+        pivot_wider(names_from = vac_provider, values_from = c(vac_shots, vac_dose1, vac_dose2))
+
+covid_vaccines <- covid_vaccines %>%
+  right_join(names, by = c("city_UF" = "PT_city_UF")) %>%
+    group_by(city_code) %>%
+      select(city_code, 
+             vac_shots_Coronavac,
+             vac_shots_Covishield.AZ,
+             vac_shots_Unknown,
+             vac_dose1_Coronavac,
+             vac_dose1_Covishield.AZ,
+             vac_dose1_Unknown, 
+             vac_dose2_Coronavac,
+             vac_dose2_Covishield.AZ,
+             vac_dose2_Unknown) %>%
+        arrange(city_code)
+
+# Replace NA values by 0
+sum(is.na(covid_vaccines))
+covid_vaccines[ is.na(covid_vaccines)] <- 0
+sum(is.na(covid_vaccines))  
+
+# Calculate variables per 100k inhabitants or per capita
+covid_vaccines <- covid_vaccines %>% 
+  left_join(pop[,c("city_code","pop.2020")], by = "city_code") %>%
+    mutate(vac.shotspercapita_Coronavac = vac_shots_Coronavac / pop.2020,
+           vac.shotspercapita_Covishield.AZ = vac_shots_Covishield.AZ / pop.2020,
+           vac.shotspercapita_Unknown = vac_shots_Unknown / pop.2020,
+           vac.dose1percapita_Coronavac = vac_dose1_Coronavac / pop.2020,
+           vac.dose1percapita_Covishield.AZ = vac_dose1_Covishield.AZ / pop.2020,
+           vac.dose1percapita_Unknown = vac_dose1_Unknown / pop.2020,
+           vac.dose2percapita_Coronavac = vac_dose2_Coronavac / pop.2020,
+           vac.dose2percapita_Covishield.AZ = vac_dose2_Covishield.AZ / pop.2020,
+           vac.dose2percapita_Unknown = vac_dose2_Unknown / pop.2020,
+           vac.dose1percapita_total = vac.dose1percapita_Coronavac + vac.dose1percapita_Covishield.AZ +vac.dose1percapita_Unknown,
+           vac.dose2percapita_total = vac.dose2percapita_Coronavac + vac.dose2percapita_Covishield.AZ +vac.dose2percapita_Unknown) %>%
+      arrange(city_code)
+covid_vaccines <- ungroup(covid_vaccines[,c(1,15:22)])
+str(covid_vaccines)
+sum(is.na(covid_vaccines))
+
+# Save cleaned data
+covid_vaccines %>%
+  write.csv("data_cleaned/db_covid_vaccines.csv",row.names=FALSE)
+
+```
+
+## 2020 Covid federal covid emergency aid
+
+Source: VIS DATA 3 beta, Auxílio Emergencial,  
+
+https://aplicacoes.mds.gov.br/sagi/vis/data3/v.php?q[]=oNOtlcPavaarrLFrsWvJf7Od086vnG1ljah9aGl4ZnWraX9%2FZF2KjmObua5%2Bo7CjnbSardyedY6tYIyNY5NolszcuZmvq5piua%2BCgWNdgIyW2Z6fwu6wmWSIq26tcHl%2BYFi60JTWoqbA4HV0sntrbqVpdndYqpLHlNawmJjvv6mhg3Cg2qXAs3JoytagjbhUwOquoKG7mJ%2BhecN%2Fb1%2BDkVyVoKK%2B57Knn61deu9shYdjXYCMltmen8LusJlkiKtzr2V9d2KQxsKfz7CWwqONqm9%2BamapYnixpo7DxqbNolud8YBrbXRlY6ScvK%2BjksrEmJJ9qZCyhGBscWCd6Jq5s6qQvIlz4HBrkKd9XWerpJvlnsCxnFWX12aac1%2BNpHiXq6mhn%2BycsnZ3o4yVX5pmXsDqrqChu5ifoXnDf2hhg5FclaCivueyp5%2BtXXrvan2AY12AjJbZnp%2FC7rCZZIira6tveX5gWLrQlNaipsDgdXSyeWpupWl2eZqcuM2Y3aCYhbvDZnN4YWqiZLC9mJm81JbPZXPTrYVmaHheZdyorrqcoLrGW6qzZZaveWRlc5ip2qWywZqSf6GpnW5liat2X5%2B3lqberLCzX23NlGmWbVyI3ryVqK2ond5hjcRoYY%2BNY5NolszcuZmvq5piua9%2Bfm9Zh4pezayUyeDAl6FwdbCqa316Z1aCxKLLqZjQ3rJcfL5ncatlfXdikMbCn8%2BwlsKjjapugG1mqWJ4saaOw8amzaJbnfGAZGx0ZWOknLyvo5LKxJiSfamOr31gbHFgneiaubOqkLyJc%2BBuapanfV1nq6Sb5Z7AsZxVl9dkoXBfjaR4l6upoZ%2FsnLJ2d6OImGmWbVyI3ryVqK2ond5hjcRqY4eNY5NolszcuZmvq5piua%2BBgW9Zh4pezayUyeDAl6FwdbCtboJ6Z1aCxKLLqZjQ3rJcfL5pb7FlfXdikMbCn8%2BwlsKjjap1eWxmqWJ4saaOw8amzaJbnfGGZm50ZWOknLyvo5LKxJiSfamWs4BgbHFgneiaubOqkLyJc%2BB2a5OnfV1dxXCg2qXAs3KhydaYpXiZvufAmXeDqK%2FmXMOBbGi9wp%2Fdom7R7cKZd4Obm%2BWssolyoMzOVuVelszcuZmvq5piua%2BAf2lZh4pezayUyeDAl6FwdbCsb3l%2BYFi60JTWoqbA4HV0snlpcqVpdnmanLjNmN2gmIW7w21ydGVjpJy8r6OSysSYkn2pjquFYGxxYJ3omrmzqpC8iXPgbmWNp31dZ6ukm%2BWewLGcVZfXZaFvX42keJerqaGf7JyydnejiZlrlm1ciN68laitqJ3eYY3Eal2HjWOTXrCY4a6gr61wruuusolyk7jNps94btDwuleyfWh135q5wZxoy9Ooz3huw9y5p6GDcK3upnDJWJDGwp%2FPsJbCo42qb3hrZqlieLGmjsPGps2iW53xgmhoeF5l3KiuupygusZbqrNkjq95ZGVzmKnapbLBmpJ%2FoambbWWJq3Zfn7eWpt6ssLNfbc2SZaBpY4amsKOdtJqt3J51jq1ejJVfmmZewOquoKG7mJ%2BhecOAbl2DkVyVoKK%2B57Knn61deu9rhYBjXYCMltmen8LusJlkiKtssm15fmBO1JyZy6mmwrbBprGtcHXfmrnBnGiS1KjXYKmQsYFvoqmhrd50wcCskpKcmcuppsK2iKextVi1mpy8r6OSysSYkn2pkLOGYGxxYJ3omrmzqpC8iXPgcGmSp31dZ6ukm%2BWewLGcVZfXZqFuX42keJerqaGf7Jyydnejiphqlm1ciN68laitqJ3eYY3EamWKjWOTXrCY4a6gr61wruuusolyk7jNps94btDwuleyfGlxtJ%2BuuqqSktWl36JumOGuoK%2BtcHXsrrpxsk660JTWoqbA4HV0snlpaqVpdnmanLjNmN2gmIW7w2VzgWFqomSwvZiZvNSWz2Vz06yEZ2h4XmXcqK66nKC6xluqs2SUsXlkZXOYqdqlssGakn%2BhqZt1ZYmrdl%2Bft5am3qyws19tzZRpmmljhqawo520mq3cnnWOrWGKmV%2BaZl7A6q6gobuYn6F5w4JsYoORXJWgor7nsqefrV16722ChmNdgIyW2Z6fwu6wmWSIq3OqcHl%2BYFi60JTWoqbA4HV0soFnbKVpdnmanLjNmN2gmIW7w210e2FqomSwvZiZvNSWz2Vz07SFamh4Xlv2dLOvo6C8nKfcspiYtrOVqLuadbSswruzfbzUptmepn3guZmjC%2BKw3qLAbpicd6Ko4gDgyeS8VIG1mqzgnruxoI7DhInLqaLPm8GjsKmhWtpZwLOpTcnGo8uwpr7fvFSsraGpmXrCxvraw8qiioKgwu20maqrnpvlXJ2zqqDGwqaKop%2FC4hDhsq2erZmdvG6n8BHDn9Ogon2%2Brpidu6ms6FkQ6KWWutBTkrCYypuvo6i7lmOcj666pp931aLenp993G2nobpVrN6prsGqjrvQU9qepb6bvff2qqGj3KhtkZiRuNSn3KxTIBW7nZ%2B3VWLsnrpumZzD1JSTYIPC7sCjnbtVn%2BWetBHko7zKpoqhon3rEO6etJ6d6FmOvqOWusKn07Oifb6unbSpWJDapbzAV6HG1ZTWXZR97rKmXLqaqtqswK%2BbnHfRlNyeU80%2BB5aosZipmXq9uqCQuNWc4KxToNy2rJ1rhZ%2FsrLyvqk28zZjRAODT4LanXLikrJmmsremTaHWl9OgnL7ncIqdtKSsma28wpiZd8JT3aKlfe2ypJ27qJvdqG2%2BmJ%2B4gaMt95XJ5LCjXJKqnuKctq%2BjUKfGpt2slNCbsqChr%2Fjn7562wVeRxoGjLfeVyeSwo1yKpKbsmm2UmJoaDp%2FTnlaz3Lmjrmipqe2auW6YTcrGpYqvmM3cwKedrKRa6Zq%2Fr1edGhuV1qaWzJuPo6i7llq%2FmroR5JnAwq%2FaeA%3D%3D
+
+
+```{r}
+emergency_aid_data <- read.csv("data/VIS DATA 3/Auxilio Emergencial_2020-21.csv") #local path of database
+#str(emergency_aid_data)
+
+emergency_aid_data <- emergency_aid_data %>%
+  mutate(city_UF = paste0(Unidade.Territorial," (",UF,")")) %>%
+  rename(year = Referência, 
+         aid_people_CU = Pessoas.elegíveis.do.público.Cadastro.Único..sem.bolsa., 
+         aid_value_CU = Valor.total.a.ser.repassado.para.público.Cadastro.Único..sem.bolsa., 
+         aid_people_appCaixa = Pessoas.elegíveis.do.público.Aplicativo.Caixa, 
+         aid_value_appCaixa = Valor.total.a.ser.repassado.para.público.Aplicativo.Caixa, 
+         aid_people_lawsuit = Pessoas.elegíveis.por.meio.Judicial, 
+         aid_value_lawsuit = Valor.total.a.ser.repassado.para.público.Judicial,
+         aid_people_BolsaFamilia = Pessoas.elegíveis.do.público.Bolsa.Família,
+         aid_value_BolsaFamilia = Valor.total.a.ser.repassado.para.público.Bolsa.Família,
+         aid_people = Total.de.pessoas.Elegíveis) %>%
+    mutate(aid_value = aid_value_CU + aid_value_appCaixa + aid_value_lawsuit + aid_value_BolsaFamilia) %>%
+      select(-Código, -Unidade.Territorial, -UF)
+str(emergency_aid_data)
+```
+
+```{r}
+covid_emergency_aid <- emergency_aid_data %>%
+  filter(year == 2020) %>%
+  group_by(city_UF) %>%
+    summarise(covid.aid_people_CU = sum(aid_people_CU), 
+              covid.aid_people_appCaixa = sum(aid_people_appCaixa), 
+              covid.aid_people_lawsuit = sum(aid_people_lawsuit), 
+              covid.aid_people_BolsaFamilia = sum(aid_people_BolsaFamilia),
+              covid.aid_people = sum(aid_people),
+              covid.aid_value_CU = sum(aid_value_CU), 
+              covid.aid_value_appCaixa = sum(aid_value_appCaixa), 
+              covid.aid_value_lawsuit = sum(aid_value_lawsuit), 
+              covid.aid_value_BolsaFamilia = sum(aid_value_BolsaFamilia),
+              covid.aid_value = sum(aid_value))
+#str(covid_emergency_aid)
+
+covid_emergency_aid <- covid_emergency_aid %>%
+  left_join(names_code7.final, by = c("city_UF" = "PT_city_UF_aux")) %>%
+  select(-city_UF) %>%
+    arrange(city_code)
+#str(covid_emergency_aid)    
+
+covid_emergency_aid <- covid_emergency_aid[, c(11, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)] 
+#str(covid_emergency_aid)
+
+# Replace NA values by 0
+sum(is.na(covid_emergency_aid))
+covid_emergency_aid[ is.na(covid_emergency_aid)] <- 0
+sum(is.na(covid_emergency_aid))  
+
+# Calculate variables per 100k inhabitants or per capita
+covid_emergency_aid <- covid_emergency_aid %>% 
+  left_join(pop[,c("city_code","pop.2020")], by = "city_code") %>%
+     mutate(covid.aidpercapita_people_CU = covid.aid_people_CU / pop.2020,
+            covid.aidpercapita_people_appCaixa = covid.aid_people_appCaixa / pop.2020,
+            covid.aidpercapita_people_lawsuit = covid.aid_people_lawsuit / pop.2020,
+            covid.aidpercapita_people_BolsaFamilia = covid.aid_people_BolsaFamilia / pop.2020,
+            covid.aidpercapita_people = covid.aid_people / pop.2020,
+            covid.aidpercapita_value_CU = covid.aid_value_CU / pop.2020,
+            covid.aidpercapita_value_appCaixa = covid.aid_value_appCaixa / pop.2020,
+            covid.aidpercapita_value_lawsuit = covid.aid_value_lawsuit / pop.2020,
+            covid.aidpercapita_value_BolsaFamilia = covid.aid_value_BolsaFamilia / pop.2020,
+            covid.aidpercapita_value = covid.aid_value/ pop.2020) %>%
+      arrange(city_code)
+covid_emergency_aid <- ungroup(covid_emergency_aid[,c(1,13:22)])
+str(covid_emergency_aid)
+sum(is.na(covid_emergency_aid))
+
+# Save cleaned data
+covid_emergency_aid %>%
+  write.csv("data_cleaned/db_covid_emergency_aid.csv",row.names=FALSE)
+
+```
+
+
+[end]
+
