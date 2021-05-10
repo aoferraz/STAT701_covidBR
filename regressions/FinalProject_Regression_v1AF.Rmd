@@ -1,0 +1,66 @@
+---
+title: "Final Project - Regression"
+author: "Alexandre, Isabella, Lu Lu"
+date: "May/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+```
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+**Objective: run regression analysis of covid cumulative cases ans deaths vs independent variables**
+
+# Covid deaths and cases vs HEALTH variables
+
+```{r}
+# Read COVID data
+covid_cumulative <- read.csv("data_cleaned/db_covid_cumulative.csv")
+str(covid_cumulative)
+
+# Read HEALTH database
+health <- read.csv("data_joined/db_health.csv")
+str(health)
+
+# Read STATE variable
+state <- read.csv("data_cleaned/db_geo_state.csv")
+state <- state %>%
+  mutate(state_name = as.factor(state)) %>%
+  select(-state)
+str(state)
+```
+
+
+```{r}
+# Prepare base for regression
+cases_health <- covid_cumulative %>%
+  select(city_code, cases_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+
+str(cases_health)
+```
+```{r}
+# Run regression
+health_fit0 <- lm(cases_per100K~, cases_health)
+summary(health_fit0)
+  
+```
+
+
+
+
+[end]
+

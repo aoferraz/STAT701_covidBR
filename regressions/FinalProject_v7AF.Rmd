@@ -1,0 +1,862 @@
+---
+title: "Covid in Brazil and associated variables"
+author: "Alexandre Ferraz, Isabella Amorim, Lu Lu"
+date: 'May, 2021'
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    number_sections: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: '4'
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(results = "hide")
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+library(geobr)
+library(crul)
+
+```
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+\pagebreak
+
+
+# Executive summary
+
+## Goal of the study
+
+Brazil confirmed its first case of Covid-19 in February 26,2020. 15 months after the outbreak, the country sees more 15M of cases and  more than 420,000 deaths. Since February, Brazil is the country with more daily new deaths per population and the third in terms of total cases, after the US and India.
+
+*"Brazil’s Covid-19 response is worst in the world"* 
+[(The Guardian, April/21)](https://www.theguardian.com/world/2021/apr/15/brazil-coronavirus-medecins-sans-frontieres-bolsonaro)
+
+It is important to understand what was done wrong and right. This study sought to investigate Brazil's structural factors and Covid-response related measures that can be associated with total Covid deaths in the country up to now (pandemic data used as of April 19, 2021).
+
+With a regression model in hands, we identified important factors of Covid death and cases, measured their potential impact and evaluated the performance of counties and states in terms of actual vs predicted results.
+
+
+## Data and methodology
+
+Our project team compiled **260 different variables for each of the 5,570 counties in Brazil**, after consolidating information of more than 80 databases, from 10 different data sources.
+
+Independent variables were divided into 6 categories: Covid-response related, geographic, population, economic, health and political. 
+
+We performed multiple regression analyses at county level, using LASSO regularization and Mallows' Cp statistics, to identify significant independent variables and develop a linear model associating deaths to relevant factors.
+
+
+## Findings
+
+The regression analysis revealed 20 significant variables which can associated with total deaths (log of deaths per 100k inhabitants). 
+
+Brazil is still a very poor country, and cities with more low income and vulnerable people seemed to suffer more causalities. Population variables compose the majority of significant variables. Some of them are percentage of population with 50 to 69 years, urban density, percentage of 'pardos*' and indigenous people in the population, rural population, access to cleaned water, number of rooms in the house, and others.
+
+In the economic category, formal and informal employment rates were the most relevant variables. The Covid emergency financial aid, funded by the federal government, also presented positive association with deaths, which might imply that the program was properly target to the most needed people.
+
+Health variables were also important. 2nd doses vaccine shots per capita, specialty beds per 100k inhabitants, nurses per 100k inhabitants and coverage of private health plans presented significance and positive correlation, while cities with more hospital beds per 100k inhabitants had fewer deaths.
+
+Finally, cities with higher percentage of votes in Jair Bolsonaro (currrent president of Brazil), also presented higher Covid deaths rates, with relevant significance.
+
+It is always important to notice that correlation doe not imply causation, but this study is a good indication that Covid hit Brazilian cities differently according to their structural factors and Covid response initiatives.
+
+*According to the Brazilian Institute of Geography and Statistics (IBGE), 'pardos' represent a diverse range of skin colors and ethnic backgrounds with a skin tone darker than white and lighter than black, also be used for people from Asia with darker skin tones or other ethnicities with the same color.
+
+\pagebreak
+
+# Introduction
+
+```{r} 
+## Read data for Introduction (EDA)
+
+# Read counties and state
+city <- read.csv("data/city_names_v1.csv", encoding = "UTF-8") %>%
+  rename(city_code = X.U.FEFF.city_code)
+
+# Read population
+pop <- read.csv("data_cleaned/db_pop.csv") 
+
+# Read GDP
+GDP <- read.csv("data_cleaned/db_econ_GDP.csv") 
+
+# Read hospital beds
+hosp_beds <- read.csv("data_cleaned/db_health_hosp_beds.csv")
+
+# Read votes 
+votesJB <- read.csv("data_cleaned/db_politics_votesEDA.csv")
+```
+
+```{r} 
+## EDA analysis
+
+# Counties per state
+counties_perstate <- city %>%
+  group_by(UF) %>%
+  summarise( qtde.counties = n())
+
+# Pop per state
+pop_perstate <- pop %>%
+  left_join(city, by = "city_code") %>%
+    group_by(UF) %>%
+    summarise( pop.state = sum(pop.2020))
+
+# GDP per state
+GDP_perstate <- GDP %>%
+  select(city_code, GDP.percapita.2018) %>%
+  left_join(pop[,c("city_code","pop.2018")], by = "city_code") %>%
+    mutate(GDP.2018 = GDP.percapita.2018 * pop.2018) %>%
+    left_join(city, by = "city_code") %>%
+      group_by(UF) %>%
+      summarise(GDP.state = sum(GDP.2018)) %>%
+        mutate(GDP.state.pct = GDP.state / sum(GDP.state))
+
+# Hospital beds per state
+hosp_beds_perstate <- hosp_beds %>%
+  select(city_code, hosp_beds.2020.per100Khab) %>%
+  left_join(pop[,c("city_code","pop.2020")], by = "city_code") %>%
+    mutate(hosp_beds.2020 = hosp_beds.2020.per100Khab * pop.2020) %>%
+    left_join(city, by = "city_code") %>%
+      group_by(UF) %>%
+      summarise(hosp_beds.state = sum(hosp_beds.2020)) %>%
+        mutate(hosp_beds.state.pct = hosp_beds.state / sum(hosp_beds.state))
+
+# Hospital beds per state
+votesJB_perstate <- votesJB %>%
+  select(city_code, votes_pct.JB, totalVotos) %>%
+  mutate(votes.county_JB = votes_pct.JB * totalVotos) %>%
+    left_join(city, by = "city_code") %>%
+      group_by(UF) %>%
+      summarise(votes.state.JB = sum(votes.county_JB), 
+                votes.state.total = sum(totalVotos)) %>%
+        mutate(votes.state.JB.pct = votes.state.JB / votes.state.total)
+
+
+```
+
+
+
+
+## The Covid problem in Brazil
+
+Brazil confirmed its first case of Covid-19 in February 26,2020. As of now, almost 15 months after the outbreak, the country sees more 15M of cases and  more than 420,000 deaths. Since February, Brazil is the country with more daily new deaths per population and the third in terms of total cases, after the US and India.
+
+![](fig/country_comparison_deathsperpop.png)
+
+![](fig/country_comparison_totalcases.png)
+
+Source: [Our World in Data](https://ourworldindata.org/covid-cases)
+  
+  
+**What are the reasons for such disaster in Brazil?**
+
+Correlation is not causation, but might be a good indicative of where to start to look.
+
+
+## Structural facts about Brazil
+
+Brazil is an emerging country with 211M (c.64% of US population), median age of 33.5 years (vs 38.4 in the US) and GDP per capita US$ 8,700 (c.13% of US), according to the 2019 numbers of the World Bank. The country is relatively young, populous and poor, compared to other nations which suffered greatly with Covid, so it is important to investigate what internal characteristics contributed for such devastating crisis.
+
+From an internal perspective, the country is greatly diverse in terms of geography, population, economy, health system and political mindset.
+
+**Geography**
+
+```{r, fig.height=6, fig.width= 8, results='hide'}
+## Plot Brazil map with states and number of cities
+
+state_layer <- read_state(code_state = "all", year=2010)
+#str(state_layer)
+
+state_counties_plot <- left_join(state_layer, counties_perstate, by = c("abbrev_state" = "UF"))
+#str(state_counties_plot)
+
+ggplot() +
+  geom_sf(data = state_counties_plot, aes(fill = qtde.counties ), lwd = 0.5, size=.15) +
+  labs(title = "Number of counties per state, 2020", size=8) +
+  scale_fill_distiller(palette = "Blues", name="Number of counties", direction = 1,
+                       limits = c(min(counties_perstate$qtde.counties),max(counties_perstate$qtde.counties))) +
+  geom_sf_label(data = state_counties_plot, aes(label = abbrev_state), label.size = 0.1, label.padding = unit(1, "mm")) +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(),
+        plot.title = element_text(color = "black", size = 12, face = "bold"))
+```
+  
+- The country is the 5th largest in the world in terms of total area
+- It has 26 states and 1 Federal District (where the capital Brasília is the only municipality), so there are 27 territories part of the Federation
+- Brazil is divided in 5 macro geographic regions: Southeast (SP, MG, RJ and ES), Northeast (BA, SE, AL, PB, PE, RN, CE, PI, MA), South (RS, PR,  SC), North (PA, AM, AP, AC, RR, TO), and Midwest (GO, MT, MS and DF)
+- There are 5570 counties, unevenly distributed across states. Minas Gerais (MG) and São Paulo (SP) have has more counties, 853 and 645 respectively, while Amapá (AP) and Roraima (RR) have only 16 and 15.
+  
+    
+    
+**Population**
+
+```{r, fig.height=6, fig.width= 8, results='hide'}
+## Plot Brazil map with population per state
+
+state_pop_plot <- left_join(state_layer, pop_perstate, by = c("abbrev_state" = "UF"))
+#str(state_pop_plot)
+
+ggplot() +
+  geom_sf(data = state_pop_plot, aes(fill = pop.state/1000000), lwd = 0.5, size=.15) +
+  labs(title = "Population per state, 2020", size=8) +
+  scale_fill_distiller(palette = "Oranges", name="Population (M people)", direction = 1,
+                       limits = c(min(pop_perstate$pop.state)/1000000,max(pop_perstate$pop.state)/1000000)) +
+  geom_sf_label(data = state_pop_plot, aes(label = paste0(abbrev_state," ",round(pop.state/1000000,1),"M")),
+                label.size = 0.5, label.padding = unit(0.6, "mm"))+ 
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(),
+        plot.title = element_text(color = "black", size = 12, face = "bold"))
+```
+
+- The 211M inhabitants are concentrated on the coast, especially in regions Southeast (42% of total) and Northeast (27% of total)
+- The state of São Paulo (SP) corresponds to 21% of Brazil's population, while its capital, São Paulo county, has 12.3M inhabitants (5.6% of total)
+- North and Midwest have smaller populations despite the huge territories, leading to lower population densities
+- There are 48.4% men and 51.6% woman
+- 85% of the population live in urban areas
+- Brazilian uses an ethnic and skin color self-declared methodology to classify races. There are approximately 46.8% pardos*, 42.7% white, 9.4% black, 1.1% Asian or Indigenous (native Amerindians)
+
+*According to the Brazilian Institute of Geography and Statistics (IBGE), 'pardos' represent a diverse range of skin colors and ethnic backgrounds with a skin tone darker than white and lighter than black, also be used for people from Asia with darker skin tones or other ethnicities with the same color
+  
+  
+   
+**Economy**
+
+```{r, fig.height=6, fig.width= 8, results='hide'}
+## Plot Brazil map with population per state
+
+state_GDP_plot <- left_join(state_layer, GDP_perstate, by = c("abbrev_state" = "UF"))
+#str(state_GDP_plot)
+
+ggplot() +
+  geom_sf(data = state_GDP_plot, aes(fill = GDP.state.pct), lwd = 0.5, size=.15) +
+  labs(title = "% of Brazil total GDP, 2018", size=8) +
+  scale_fill_distiller(palette = "Greens", name="Share of total GDP", direction = 1,
+                       limits = c(0,0.35)) +
+  geom_sf_label(data = state_GDP_plot, aes(label = paste0(abbrev_state," ",round(GDP.state.pct*100,0),"%")), 
+                label.size = 0.5, label.padding = unit(0.6, "mm")) +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(),
+        plot.title = element_text(color = "black", size = 12, face = "bold"))
+```
+  
+- GDP and income distribution in Brazil is highly unequal. According to the World Bank, Brazil is the 9th nation in terms of inequality
+- The Southeast is the richest region of Brazil, which translates into better income and education levels. São Paulo is the business center of the country and concentrates industry, services and consumption volumes
+- The Midwest' economy is focused on the agriculture and livestock activities
+- Northeast and North are poorer, presenting relevant part of population living in poverty or extreme poverty, and facing problems such as lack of access to cleaned water and sewage. Those regions have predominance of black and 'pardo' people, historically marginalized groups
+- 50% of the economically active population is formally employed, so there is a relevant share of informal jobs and a current high unemployment rate (14%), driven by the pandemic but mainly by political-economic downturn of 2014
+- Almost 60% of the population receives direct or indirect support of the Federal Government through the 'Bolsa-Família' program, a social welfare program for poor families. Financial aid amount varies according to the number of family profile, number and age of children
+  
+    
+**Health system**
+
+```{r, fig.height=6, fig.width= 8, results='hide'}
+## Plot Brazil map with % of total hospital beds per state
+
+state_beds_plot <- left_join(state_layer, hosp_beds_perstate, by = c("abbrev_state" = "UF"))
+#str(state_beds_plot)
+
+ggplot() +
+  geom_sf(data = state_beds_plot, aes(fill = hosp_beds.state.pct), lwd = 0.5, size=.15) +
+  labs(title = "% of Brazil total hospital beds, 2020", size=8) +
+  scale_fill_distiller(palette = "Reds", name="Share of total hosp. beds", direction = 1,
+                       limits = c(0,0.35)) +
+  geom_sf_label(data = state_beds_plot, aes(label = paste0(abbrev_state," ",round(hosp_beds.state.pct*100,0),"%")), 
+                label.size = 0.5, label.padding = unit(0.6, "mm")) +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(),
+        plot.title = element_text(color = "black", size = 12, face = "bold"))
+```
+
+- Brazil has a universal publicly funded health care system (SUS), virtually covering the entire population, which makes it the largest in the world
+- Considering its capillarity, amplitude and high demand, the system faces several challenges, such as the unequal coverage across regions, services downturn and long wait times
+- Population with better income levels usually pays for private health plans.  Although only 23% of the population is covered by some type of private health insurance (rate which varies greatly across counties and regions), private expenditure with Health Care in Brazil corresponds to 58% of the total expenditure, according to ANS (Health National Agency)
+- The country has a National Program for Immunization, publicly sponsored and offered, for children and adults. Before Covid, historically coverage has been high (more than 90%)
+
+
+**Politics**
+
+```{r, fig.height=6, fig.width= 8, results='hide'}
+## Plot Brazil map with population per state
+
+state_votesJB_plot <- left_join(state_layer, votesJB_perstate, by = c("abbrev_state" = "UF"))
+#str(state_votesJB_plot)
+
+ggplot() +
+  geom_sf(data = state_votesJB_plot, aes(fill = votes.state.JB.pct), lwd = 0.5, size=.15) +
+  labs(title = "% valid votes in Jair Bolsonaro (JB) in the 2nd election round, 2018", size=8) +
+  scale_fill_distiller(palette = "BuPu", name="% votes on JB", direction = 1,
+                       limits = c(0,1)) +
+  geom_sf_label(data = state_votesJB_plot, aes(label = paste0(abbrev_state," ",round(votes.state.JB.pct*100,0),"%")), 
+                label.size = 0.5, label.padding = unit(0.6, "mm")) +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(),
+        plot.title = element_text(color = "black", size = 12, face = "bold"))
+```
+
+- Brazil is a federal presidential representative democratic republic, with 3 independent branches (executive, legislative and judicial) and three levels of administration (federal, state and municipalities)
+- Presidential elections have direct votes, disputed by all candidates in the first round, and by the 2 most voted in the 2nd round (if the most voted candidate in the 1st round does not achieve 50% + 1 of valid votes)
+- The last presidential election was in 2018, and the 2nd round was disputed by Jair Bolsonaro (right-wing candidate) and Fernando Haddad (left-wing candidate). Jair Bolsonaro was elected with 55.13% of valid votes in the 2nd round, after a very disturbed and polarized election process
+  
+  
+
+## Covid response
+
+*"While other countries look to open up, Brazil can’t find a way to shut down"*
+[(Washington Post, March/20)](https://www.washingtonpost.com/world/while-other-countries-look-to-open-up-brazil-cant-find-a-way-to-shut-down/2020/05/10/2c02abea-92c1-11ea-87a3-22d324235636_story.html)
+
+*"A Collapse Foretold: How Brazil’s Covid-19 Outbreak Overwhelmed Hospitals"*
+[(The New York Times, March/21)](https://www.nytimes.com/2021/03/27/world/americas/virus-brazil-bolsonaro.html)
+
+*"Covid: Brazil passes 400,000 deaths amid slow vaccination"*
+[(BBC, April/21)](https://www.bbc.com/news/world-latin-america-56913943)
+
+*"Brazil’s Covid-19 response is worst in the world"* 
+[(The Guardian, April/21)](https://www.theguardian.com/world/2021/apr/15/brazil-coronavirus-medecins-sans-frontieres-bolsonaro)
+  
+    
+As a response for the catastrophic number of cases and deaths, there has been an increasing criticism about the overall response of authorities, of different levels and sectors, to the crisis. The overall reaction was seen as late, limited, disorganized and disoriented.
+
+From a general view, the coordination of lockdown and other social distancing measures was decentralized among states and counties, hindering the mapping and monitoring of initiatives taken.
+
+Government expenditure with Covid is disclosed and can be analyzed at city level. The federal government also launched a Covid emergency financial aid, targeted to the more vulnerable people during the pandemic (low income, unemployed or informal, others). The program reached 1/3 the total population, costing 4% of the GDP.
+
+From a health perspective, the main initiatives taken were the expansion of the assistance network (beds, equipment, staff) and the vaccine program (started on January 17, 2020).
+  
+    
+
+## Goal of the study
+
+Understanding the gravity of the Covid pandemic in Brazil, its important internal diversity and structural differences, and the responses taken so far, this study seeks to investigate structural factors and Covid-response related measures that can be associated with total Covid deaths in the country (pandemic data used as of April 19, 2021).
+
+Our project team compiled 260 different variables for each of the 5,570 counties in Brazil, after consolidating information of more than 80 databases, from 10 different data sources
+
+We performed multiple regression analysis, using LASSO regularization and Mallows' Cp statistics, to identify significant independent variables and develop a linear model associating cases and deaths to relevant factors.
+
+With the model in hands, we can identified important factors of Covid death and cases, measured their potential impact and evaluated the performance of counties and states in terms of actual vs predicted results.
+
+
+# Data and methodology
+
+## Structure
+
+The data used in the study is divided in 6 categories:
+
+**1) Covid**
+
+- Cumulative deaths per 100k inhabitants (independent variable)
+- Government expenditure with COVID
+- Covid ICU beds sponsored by the Federal Government
+- Vaccines
+- 2020 Covid federal covid emergency aid
+
+**2) Geographic**
+
+- State names
+- County area
+- Urban area
+- Metropolitan area classification
+
+**3) Population**
+
+- Absolute population
+- Population by age bracket
+- Population by sex
+- Population rural vs urban
+- Population by race
+- Population by education level
+- Residents per house
+- Rooms per house
+- Population density
+- Access to tap water
+- Bathrooms and sewage
+
+**4) Economic data**
+
+- GDP by economy sector
+- Work commuting time
+- Population by wage level
+- Employment category
+- Average working hours
+- Employment evolution
+- Employed by economy sector
+- Companies, workers and salaries evolution
+- Beneficiaries of the 'Bolsa Família' program 
+
+**5) Health data**
+
+- Hospital beds
+- Specialty beds
+- Ventilators
+- Oxygen plants
+- Doctors
+- Nurses
+- Death rate by conditions
+- Lives covered by private health insurance
+
+**6) Political data**
+
+- Votes of the last presidential elections
+
+  
+## Methodology
+
+The figure bellow represents the information flow, showing in high level how data was manipulated:
+
+![](fig/information_flow.jpg)
+
+The regression script formats the cleaned and joined data in order to perform the regression. Because of the huge number of independent variables, instead of running a full LASSO, we ran regressions within each category to screen variables, eliminate potential colinearities, remove variables with excessive NA or NaN values, pre-selecting variables for the full LASSO + fine tuning.
+
+In the regressions, we forced the state name variables (27 levels) and used the Elbow rule to choose the optimal number of predictors when evaluating Cps. LASSO was run using forward selection and lambda.min.
+
+We transformed deaths per 100k inhabitant to log in order to improve the model.
+
+![](fig/analytic_approach.jpg)
+  
+## Sources
+
+Data was pulled from the following sources:
+
+- [**Brasil.io:** ](https://brasil.io/home/) Platform with open data collectively consolidated, with a special Covid repository
+- [**IBGE (SIDRA system):**](https://sidra.ibge.gov.br/home/pmc/brasil) Brazilian Statistics Institute, source of majority of population and economic data. Tables of 2010 Census (last available), EstimaPOP, and CEMPRE were used
+- [**RAIS/CAGED:**](https://bi.mte.gov.br/bgcaged/) Platform of the Ministry of Economy tracking companies, employment ans salaries data
+- [**DATASUS (TabNet system):**](http://www2.datasus.gov.br/DATASUS/index.php?area=02) Platform of the Ministry of Health tracking deaths, equipment and health staff across the country
+- [**Localiza SUS:**](https://localizasus.saude.gov.br/) New platform of the Ministry of Health of easy access to track different health indicators
+- [**ANS (TabNet system):**](http://www.ans.gov.br/anstabnet/index.htm) National Agency Health, comprising private health databases
+- [**Dados.gov:**](https://dados.gov.br/) Brazilian open data portal
+- [**VIS DATA 3:**](https://aplicacoes.mds.gov.br/sagi/vis/data3/data-explorer.php) Platform of the Ministry of Citizenship, with information about the Covid emergency financial aid
+- [**Geoinfo:**](http://geoinfo.cnpm.embrapa.br/) Platform of the Brazilian Agricultural Research Corporation, with spatial data
+- [**Gazeta do Povo:**](https://www.gazetadopovo.com.br/) Digital newspaper, with consolidated information about presidential election in 2018
+
+
+## Variables
+
+The descriptions of the dataframes created and their variables are bellow:
+  
+**1) Covid data**
+  
+  - **covid_evo**: number of new cases and deaths per day; and number of new cases per 100k inhabitants and deaths per 100k inhabitants per day, from first day of appearance on Brazil (25/Feb/20) to last day of available data for all cities (last update on 16/March/2021)
+  - **covid_cumulative**: number of total cases and deaths; and number of  total cases per 100k inhabitants and total deaths per 100k inhabitants, from first day of appearance on Brazil (25/Feb/20) to last day of available data for all cities (last update on 16/Mar/2021)
+  - **covid_fed_ICUbeds**: number of ICU beds dedicated to Covid sponsored by the Federal government per 100k inhabitants; and corresponding value (Brazilian Reais, BRL) per capita (2021)
+  - **covid_spent**: covid health expenditure per capita in each city with federal, state or city funds (2020)
+  - **covid_vaccines**: shots per capita of 1st and 2nd doses by supplier (Coronavac, Covishield - AstraZeneca, unknown), up to 21/Apr/2021
+  - **covid_emergency_aid**: % of the population which received the federal emergency aid by type of enrollment (Cadastro Único, Caixa app, lawsuit, Bolsa Família); and per capita value (Brazilian Reais, BRL) by type of enrollment, (2020)
+  
+**2) Geo data**
+
+  - **names**: IBGE city code (7 digits), city name (in Portuguese)
+  - **names_code7.final**: IBGE city code (7 digits), city name 
+  - **names_code6.final**: IBGE city code (6 digits), city name 
+  - **names_aux** (versions 1 to 7, increasing list of names)
+  - **state**: name of corresponding state for each city (27 levels)
+  - **area**: total city area in km2 (2010)
+  - **area_urban**: urban area in km2 (2015)
+  - **metro**: metropolitan area (metro), urban (urban agglomeration) and non-metro/urban (2020)
+  
+**3) Population data**
+  
+  - **pop**: estimated total city population (2011-2020), % annual growth from 2012 to 2020
+  - **pop_age**: % population by age bracket of 5 years (2010)
+  - **pop_sex**: % population male or female (2010)
+  - **pop_urban**: % population rural or urban (2010)
+  - **pop_race**: % population white, black, Asian, pardos, indigenous or others (2010)
+  - **pop_edu**: % population in each education level (from kindergarten to doctorate) and % population in private or public education (2010)
+  - **pop_residents**: average number of residents per house (2010)
+  - **pop_rooms**: % houses with 1, 2, …,  9, 10+ rooms and estimated average number of rooms per house (2010)
+  - **pop_density**: city population density and urban density (2010)
+  - **pop_water**: % houses with access to tap water (inside the house or in the property) and with no access (2010)
+  - **pop_bathroom**: % houses with access to bathroom (sewage, septic tank or other destination of waste) and with no bathrooms (2010)
+  	
+**4) Economic data**
+  
+  - **GDP**: % of GDP from agriculture, industry, services, government spent and taxes (2018); GDP nominal growth from 2010 to 2015 and from 2015 to 2018, and GDP per capita (2018)
+  - **commute_time**: % of occupied population by commuting time (<5 min, 6 to 10 min, 30 to 60 min, 1 to 2h, +2h); and estimated average commuting time (2010)
+  - **wages_level**: % of population by salary bracket in terms of minimum wage (<.25 [extreme poverty], 0.25 to 0.5 [poverty], 0.5 to 1, 1 to 2, etc.); and estimated average salary (2010)
+  - **employment_category**: % of occupied population by type of employment (private formal, public formal, informal, working with no wage, working for subsistence, owner of business, self-employed), (2010)
+  - **working_hours**: % of occupied population by weekly working hours (<14h, 15 to 39h, 40 to 44h, 45 to 48h, >49h); and estimated average working hours (2010)
+  - **employment_evo**: % annual increase of employment rate from 2012 to 2015, from 2015 to 2018, and from 2018 to 2019; and % of employed of total population (2019)
+  - **employment_sector**: % of workers by economy sector (agriculture, extractive industry, transformation industry, power, water and sewage, building, trade, etc.), (2019)
+  - **companies**: number of active companies  per 100k inhabitants (2018) and growth from 2016 to 2018; average salary in terms of minimum wage (2018) and growth from 2016 to 2018; % workers of total population (2018) and growth from 2016 to 2018
+  - **bolsa_familia**: number of families receiving the benefit per 100k inhabitants; and value (in Brazilian reais, BRL) per inhabitant (2019)
+  
+**5) Health data**
+	
+  - **hosp_beds**: number of hospital beds per 100k inhabitants (Mar/19, Mar/20 and Mar/21); and growth (absolute increment) from 2019 to 2020, and from 2020 to 2021
+  - **spec_beds**: number of beds per 100k inhabitants per type of bed (Covid ICU adult 2, Covid ICU child 2, insulation unit, ICU adults 1, 2 and 3, intermediary care adult, Covid respiratory support, total specialty), for private beds, public beds, total beds in Mar/2021, and growth (absolute increment) from Mar/2020 to Mar/2021
+  - **ventilators**: Number of ventilators in use per 100k inhabitants in Mar/20; growth from Mar/20 to Mar/21; and percentage of ventilators in use of total existing, in 2020 and 2021
+  - **oxygen**: Number of oxygen plants in use per 100k inhabitants in Mar/20; growth from Mar/20 to Mar/21; and percentage of oxygen plants in use of total existing, in 2020 and 2021
+  - **doctors**: Number of doctors by specialty (all doctors, pulmonologist, infectologist, intensivist) and type (private, public, total) per 100k inhabitants in Mar/20; and growth from Mar/20 to Mar/21
+  - **nurses**: Number of nurses by category (professional, assistant, technician) and type (private, public, total) per 100k inhabitants in Mar/20; and growth from Mar/20 to Mar/21
+  - **death_conditions**: number of deaths by condition (accidents, circulatory system diseases, diabetes, hypertensive diseases, respiratory system diseases) per 100k inhabitants in 2019
+  - **lives**: number of lives covered by private health insurances by type (outpatient, hospital, outpatient and hospital, reference, unknown, total) per 100k inhabitants in Mar/2020; and growth from Mar/2020 to Dec/2020
+	
+**6) Politics data**
+
+  - **votes**: percentage of votes of Jair Bolsonaro (current president) in the last election (2018)
+			
+	
+
+
+
+# Appendix: Regression script
+
+## Inputs: Covid deaths and cases vs HEALTH variables
+
+```{r}
+# Read COVID data
+covid_cumulative <- read.csv("data_cleaned/db_covid_cumulative.csv") %>%
+  arrange(city_code)
+str(covid_cumulative)
+
+# Read HEALTH database
+health <- read.csv("data_joined/db_health.csv") %>%
+  arrange(city_code)
+str(health)
+
+# Read STATE variable
+state <- read.csv("data_cleaned/db_geo_state.csv") %>%
+  arrange(city_code)
+state <- state %>%
+  mutate(state_name = as.factor(state)) %>%
+  select(-state)
+str(state)
+
+# Read city names (to identify cities)
+city <- read.csv("data/city_names_v1.csv", encoding = "UTF-8") %>%
+  rename(city_code = X.U.FEFF.city_code)
+
+```
+
+## Preparation: format databases to run the regressions
+
+```{r}
+# Create transformed (log) independent variables
+covid_cumulative <- covid_cumulative %>%
+  mutate(logdeaths_per100K = log(deaths_per100K+0.01)) %>%
+  mutate(logcases_per100K = log(cases_per100K+1))
+```
+
+
+```{r}
+## CASES
+
+# Prepare CASES base for regression (full = might have NAs)
+cases_health_full <- covid_cumulative %>%
+  select(city_code, cases_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(cases_health_full)
+sum(is.na(cases_health_full))
+
+# Prepare CASES base for LASSO (without NAs)
+cases_health.NA <- colSums(is.na(cases_health_full))
+cases_health.NA.index <- which(cases_health.NA != 0, arr.ind= TRUE)
+cases_health <- cases_health_full[,-cases_health.NA.index]
+sum(is.na(cases_health))
+
+# Prepare LOG CASES base for regression (full = might have NAs)
+logcases_health_full <- covid_cumulative %>%
+  select(city_code, logcases_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(logcases_health_full)
+sum(is.na(logcases_health_full))
+
+# Prepare LOG CASES base for LASSO (without NAs)
+logcases_health.NA <- colSums(is.na(logcases_health_full))
+logcases_health.NA.index <- which(logcases_health.NA != 0, arr.ind= TRUE)
+logcases_health <- logcases_health_full[,-logcases_health.NA.index]
+sum(is.na(logcases_health))
+
+## DEATHS
+
+# Prepare DEATHS base for regression
+deaths_health_full <- covid_cumulative %>%
+  select(city_code, deaths_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(deaths_health_full)
+sum(is.na(deaths_health_full))
+
+# Prepare DEATHS base for LASSO (without NAs)
+deaths_health.NA <- colSums(is.na(deaths_health_full))
+deaths_health.NA.index <- which(deaths_health.NA != 0, arr.ind= TRUE)
+deaths_health <- deaths_health_full[,-deaths_health.NA.index]
+sum(is.na(deaths_health))
+
+# Prepare LOG DEATHS base for regression
+logdeaths_health_full <- covid_cumulative %>%
+  select(city_code, logdeaths_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(logdeaths_health_full)
+sum(is.na(logdeaths_health_full))
+
+# Prepare LOG DEATHS base for LASSO (without NAs)
+logdeaths_health.NA <- colSums(is.na(logdeaths_health_full))
+logdeaths_health.NA.index <- which(logdeaths_health.NA != 0, arr.ind= TRUE)
+logdeaths_health <- logdeaths_health_full[,-logdeaths_health.NA.index]
+sum(is.na(logdeaths_health))
+
+```
+
+# Regressions
+
+## Deaths: linear model (all in)
+
+```{r}
+# Run deaths vs health regression (linear model)
+deaths_health_fit0 <- lm(deaths_per100K~., deaths_health_full)
+summary(deaths_health_fit0)
+
+# Run log deaths vs health regression (linear model)
+logdeaths_health_fit0 <- lm(logdeaths_per100K~., logdeaths_health_full)
+summary(logdeaths_health_fit0)
+```
+
+## Cases: linear model (all in)
+
+```{r}
+# Run cases vs health regression (linear model)
+cases_health_fit0 <- lm(cases_per100K~., cases_health_full)
+summary(cases_health_fit0)
+
+# Run log cases vs health regression (linear model)
+logcases_health_fit0 <- lm(logcases_per100K~., logcases_health_full)
+summary(logcases_health_fit0)
+
+```
+
+## Deaths: LASSO and fine-tuning
+
+```{r}
+## Run LASSO of DEATHS vs health variables
+
+#Step 1: Prepare design matrix
+Y_deaths <- deaths_health[,1]
+X_health <- model.matrix(deaths_per100K~., data = deaths_health)
+
+#Step 2: Find x's output from LASSO with min cross-validation error
+set.seed(10)  # to control the ramdomness in K folds 
+
+deaths_health_fit.cv <- cv.glmnet(X_health, Y_deaths, alpha=1, nfolds=10, intercept = T, 
+                                  penalty.factor = c(rep(0,27), rep(1, ncol(X_health)-27))) 
+
+plot(deaths_health_fit.cv)
+
+health_coef.min <- coef(deaths_health_fit.cv, s="lambda.min")  #s=c("lambda.1se","lambda.min") or lambda value
+health_coef.min <- health_coef.min[which(health_coef.min !=0),]   # get the non-zero coefficients
+health_var.min <- rownames(as.matrix(health_coef.min))[-1] # output the names  dim(as.matrix(coef.min))
+
+#health_coef.min
+health_var.min
+
+```
+
+```{r}
+## Screen variables to avoid colinearity
+#which( var.min == "beds.priv.per100Khab.2021_specialty.total", arr.ind = TRUE)
+health_var.min_final <- health_var.min
+dim(as.matrix(health_var.min_final))
+
+```
+
+```{r}
+## Fine tuning
+
+# Calculate number of levels of forced variable (states)
+forced_size <- deaths_health %>% 
+  select(state_name) %>%
+    distinct() %>%
+      dim()
+forced_size <- forced_size[1]
+
+# Calculate number of variables chosen in LASSO
+max_var<-dim(as.matrix(health_var.min_final))[1] 
+
+deaths_health.sub <- deaths_health %>%
+  select(state_name, health_var.min_final[forced_size:max_var], deaths_per100K)
+
+X_health.sub <- model.matrix(deaths_per100K~., data = deaths_health.sub)
+
+deaths_health.fine_tuning <- regsubsets(deaths_per100K ~., data = deaths_health.sub, 
+                                        nvmax=max_var, force.in = c(1:(forced_size-1)), method="exhaustive", really.big = TRUE)
+ 
+summary(deaths_health.fine_tuning)
+plot(summary(deaths_health.fine_tuning)$cp) 
+```
+
+```{r}
+# Select number of (not-forced) variables using Cp
+deaths_health.final.summary<- summary(deaths_health.fine_tuning)
+opt.size <- 15 #selected using elbow rule
+
+# Select variables
+deaths_health.final.var.1 <- deaths_health.final.summary$which
+deaths_health.final.var <- colnames(deaths_health.final.var.1)[deaths_health.final.var.1[opt.size, ]][-1] #take the intercept put
+deaths_health.final.var <- deaths_health.final.var[-c(1:(forced_size-1))]
+deaths_health.final.var
+
+# Final model
+deaths_health.final.fit <- lm(deaths_per100K ~., 
+                              deaths_health.sub[, c("deaths_per100K", "state_name", deaths_health.final.var)])
+summary(deaths_health.final.fit)
+
+plot(deaths_health.final.fit, 1)
+plot(deaths_health.final.fit, 2)
+```
+
+```{r}
+deaths_health.final.predicted <- predict(deaths_health.final.fit)
+deaths_health.final.stdres <- rstandard(deaths_health.final.fit)
+
+plot(Y_deaths,deaths_health.final.predicted)
+
+# Save data
+deaths_health_results <- data.frame(covid_cumulative[,c("city_code","deaths_per100K")], 
+                                    deaths_health.final.predicted, deaths_health.final.stdres) 
+deaths_health_results <- deaths_health_results %>%
+  left_join(city, by = "city_code")
+
+deaths_health_results <- deaths_health_results[,c(1,7,6,2,3,4)]
+str(deaths_health_results)
+
+deaths_health_results %>%
+  write.csv("results/db_results_deaths_health.csv",row.names=FALSE)
+```
+
+```{r}
+# Select variables MANUALLY
+
+deaths_health_manual <- deaths_health %>% 
+   select(deaths_per100K, 
+          state_name,
+          hosp_beds.2021.per100Khab,
+          hosp_beds.growth.2020to21,
+          beds.total.per100Khab.2021_ICU.adult1,
+          beds.total.per100Khab.2021_specialty.total,
+          #beds.total.growth20to21_ICU.adult1,
+          beds.total.growth20to21_ICU.adult3,
+          #beds.priv.growth20to21_ICU.adult1,
+          beds.priv.growth20to21_ICU.adult3,  
+          beds.publ.per100Khab.2021_specialty.total,
+          #oxygen.usedper100K_03.2020,
+          #infecto_all.2020.totalper100K,
+          nurses_prof.2020.totalper100K,
+          deaths_diabetes.2019per100K,
+          deaths_circulatory.2019per100K,
+          #deaths_hypertensive.2019per100K,
+          deaths_respiratory.2019per100K,
+          lives_03.20.per100k.total,
+          lives_per100k.growth.total)
+  
+# Run deaths vs health regression (linear model) - fit MANUAL
+deaths_health_fit1 <- lm(deaths_per100K~., deaths_health_manual)
+summary(deaths_health_fit1)
+  
+```
+
+## log Deaths: LASSO and fine-tuning
+
+```{r}
+## Run LASSO of log DEATHS vs health variables
+
+#Step 1: Prepare design matrix
+Y_logdeaths <- logdeaths_health[,1]
+X_loghealth <- model.matrix(logdeaths_per100K~., data = logdeaths_health)
+
+#Step 2: Find x's output from LASSO with min cross-validation error
+set.seed(10)  # to control the ramdomness in K folds 
+
+logdeaths_health_fit.cv <- cv.glmnet(X_loghealth, Y_logdeaths, alpha=1, nfolds=10, intercept = T, 
+                                  penalty.factor = c(rep(0,27), rep(1, ncol(X_loghealth)-27))) 
+
+plot(logdeaths_health_fit.cv)
+
+loghealth.coef.min <- coef(logdeaths_health_fit.cv, s="lambda.min")  #s=c("lambda.1se","lambda.min") or lambda value
+loghealth.coef.min <- loghealth.coef.min[which(loghealth.coef.min !=0),]   # get the non-zero coefficients
+loghealth.var.min <- rownames(as.matrix(loghealth.coef.min))[-1] # output the names  dim(as.matrix(coef.min))
+
+#loghealth.coef.min
+loghealth.var.min
+
+```
+
+```{r}
+## Screen variables to avoid colinearity
+#which( var.min == "beds.priv.per100Khab.2021_specialty.total", arr.ind = TRUE)
+loghealth.var.min_final <- loghealth.var.min
+dim(as.matrix(loghealth.var.min_final))
+
+```
+
+```{r}
+## Fine tuning
+
+# Calculate number of levels of forced variable (states)
+forced_size <- logdeaths_health %>% 
+  select(state_name) %>%
+    distinct() %>%
+      dim()
+forced_size <- forced_size[1]
+
+# Calculate number of variables chosen in LASSO
+max_var<-dim(as.matrix(loghealth.var.min_final))[1] 
+
+logdeaths_health.sub <- logdeaths_health %>%
+  select(state_name, loghealth.var.min_final[forced_size:max_var], logdeaths_per100K)
+
+X_loghealth.sub <- model.matrix(logdeaths_per100K~., data = logdeaths_health.sub)
+
+logdeaths_health.fine_tuning <- regsubsets(logdeaths_per100K ~., data = logdeaths_health.sub, 
+                                        nvmax=max_var, force.in = c(1:(forced_size-1)), method="forward")
+ 
+summary(logdeaths_health.fine_tuning)
+plot(summary(logdeaths_health.fine_tuning)$cp) 
+```
+
+```{r}
+# Select number of (not-forced) variables using Cp
+logdeaths_health.final.summary<- summary(logdeaths_health.fine_tuning)
+opt.size <- 20 #selected using elbow rule
+
+# Select variables
+logdeaths_health.final.var.1 <- logdeaths_health.final.summary$which
+logdeaths_health.final.var <- colnames(logdeaths_health.final.var.1)[logdeaths_health.final.var.1[opt.size, ]][-1] #take the intercept put
+logdeaths_health.final.var <- logdeaths_health.final.var[-c(1:(forced_size-1))]
+logdeaths_health.final.var
+
+# Final model
+logdeaths_health.final.fit <- lm(logdeaths_per100K ~., 
+                              logdeaths_health.sub[, c("logdeaths_per100K", "state_name", logdeaths_health.final.var)])
+summary(logdeaths_health.final.fit)
+
+plot(logdeaths_health.final.fit, 1)
+plot(logdeaths_health.final.fit, 2)
+
+```
+
+
+[end]
+

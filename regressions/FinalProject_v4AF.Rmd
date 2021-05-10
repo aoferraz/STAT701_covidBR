@@ -1,0 +1,459 @@
+---
+title: "Final Project - Covid in Brazil and associated variables"
+author: "Alexandre Ferraz, Isabella Amorim, Lu Lu"
+date: 'May, 2021'
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: '4'
+  html_document:
+    code_folding: show
+    highlight: haddock
+    number_sections: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+```
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+\pagebreak
+
+
+# Executive summary
+
+## Goal of the study
+
+## Data
+
+## Findings
+
+
+
+\pagebreak
+
+# Introduction
+
+## The Covid problem in Brazil
+
+Brazil confirmed its first case of Covid-19 in February 26,2020. As of now, almost 15 months after the outbreak, the country sees more 15M of cases and  more than 420,000 deaths. Since February, Brazil is the country with more daily new deaths per population and the third in terms of total cases, after the US and India.
+
+[insert figure with evolution of deaths per population of selected countries]
+
+[insert figure with evolution of total cases of selected countries]
+
+What are the reasons for such disaster in Brazil?
+
+## Structural facts about Brazil
+
+Brazil is an emerging country with 211M (c.64% of US population), median age of 33.5 years (vs 38.4 in the US) and GDP per capita US$ 8,700 (c.13% of US), according to the 2019 numbers of the World Bank. The country is relatively young, populous and poor, compared to other nations which suffered greatly with Covid, so it is important to investigate what internal characteristics contributed for such devastating crisis.
+
+From an internal perspective, the country is greatly diverse in terms of geography, population, economy, health infrastructure and political mindset.
+
+**Geography**
+
+[plot Brazil map with states and number of cities]
+
+- The country is the 5th largest in the world
+- It has 26 states and 1 Federal District (where the capital Brasília is the only city located), so there are 27 territories part of the Federation
+- Brazil is divided in 5 macro geographic regions: Southeast, Northeast, South, North, and Midwest
+- There are 5570 counties, unevenly distributed across states. Minas Gerais (MG) and São Paulo (SP) have has more counties, 853 and 645 respectively, while Amapá (AP) and Roraima (RR) have only 16 and 15.
+
+**Population**
+
+[plot Brazil map with states and population]
+
+- The 211M inhabitants are concentrated on the coast, especially in regions Southeast (X% of total) and Northeast (X% of total)
+- The state of São Paulo (SP) corresponds to X% of Brazil's population, while its capital, São Paulo county, has XXM inhabitant ((X% of total)
+- North and Midwest have smaller populations despite the huge territories, leading to lower population densities
+- There are 48.4% men and 51.6% woman
+- 85% of the population live in urban areas
+- Brazilian uses an ethnic and skin color self-declared methodology to classify races. There are approximately 46.8% pardos*, 42.7% white, 9.4% black, 1.1% Asian or Indigenous (native Amerindians)
+
+*According to the Brazilian Institute of Geography and Statistics (IBGE), 'pardos' represent a diverse range of skin colors and ethnic backgrounds with a skin tone darker than white and lighter than black, also be used for people from Asia with darker skin tones or other ethnicities with the same color
+
+**Economy**
+
+[plot Brazil map with states and % of GDP]
+
+- The 211M inhabitants are concentrated on the coast, especially in regions Southeast (X% of total) and Northeast (X% of total)
+- The state of São Paulo (SP) corresponds to X% of Brazil's population, while its capital, São Paulo county, has XXM inhabitant ((X% of total)
+- North and Midwest have smaller populations despite the huge territories, leading to lower population densities
+- There are 48.4% men and 51.6% woman
+- 85% of the population live in urban areas
+
+
+
+## Covid response
+
+## Goal of the study
+
+
+
+
+
+
+
+**Objective: run regression analysis of covid cumulative cases ans deaths vs independent variables**
+
+# Data preparation
+
+## Inputs: Covid deaths and cases vs HEALTH variables
+
+```{r}
+# Read COVID data
+covid_cumulative <- read.csv("data_cleaned/db_covid_cumulative.csv") %>%
+  arrange(city_code)
+str(covid_cumulative)
+
+# Read HEALTH database
+health <- read.csv("data_joined/db_health.csv") %>%
+  arrange(city_code)
+str(health)
+
+# Read STATE variable
+state <- read.csv("data_cleaned/db_geo_state.csv") %>%
+  arrange(city_code)
+state <- state %>%
+  mutate(state_name = as.factor(state)) %>%
+  select(-state)
+str(state)
+
+# Read city names (to identify cities)
+city <- read.csv("data/city_names_v1.csv", encoding = "UTF-8") %>%
+  rename(city_code = X.U.FEFF.city_code)
+
+```
+
+## Preparation: format databases to run the regressions
+
+```{r}
+# Create transformed (log) independent variables
+covid_cumulative <- covid_cumulative %>%
+  mutate(logdeaths_per100K = log(deaths_per100K+0.01)) %>%
+  mutate(logcases_per100K = log(cases_per100K+1))
+```
+
+
+```{r}
+## CASES
+
+# Prepare CASES base for regression (full = might have NAs)
+cases_health_full <- covid_cumulative %>%
+  select(city_code, cases_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(cases_health_full)
+sum(is.na(cases_health_full))
+
+# Prepare CASES base for LASSO (without NAs)
+cases_health.NA <- colSums(is.na(cases_health_full))
+cases_health.NA.index <- which(cases_health.NA != 0, arr.ind= TRUE)
+cases_health <- cases_health_full[,-cases_health.NA.index]
+sum(is.na(cases_health))
+
+# Prepare LOG CASES base for regression (full = might have NAs)
+logcases_health_full <- covid_cumulative %>%
+  select(city_code, logcases_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(logcases_health_full)
+sum(is.na(logcases_health_full))
+
+# Prepare LOG CASES base for LASSO (without NAs)
+logcases_health.NA <- colSums(is.na(logcases_health_full))
+logcases_health.NA.index <- which(logcases_health.NA != 0, arr.ind= TRUE)
+logcases_health <- logcases_health_full[,-logcases_health.NA.index]
+sum(is.na(logcases_health))
+
+## DEATHS
+
+# Prepare DEATHS base for regression
+deaths_health_full <- covid_cumulative %>%
+  select(city_code, deaths_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(deaths_health_full)
+sum(is.na(deaths_health_full))
+
+# Prepare DEATHS base for LASSO (without NAs)
+deaths_health.NA <- colSums(is.na(deaths_health_full))
+deaths_health.NA.index <- which(deaths_health.NA != 0, arr.ind= TRUE)
+deaths_health <- deaths_health_full[,-deaths_health.NA.index]
+sum(is.na(deaths_health))
+
+# Prepare LOG DEATHS base for regression
+logdeaths_health_full <- covid_cumulative %>%
+  select(city_code, logdeaths_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(logdeaths_health_full)
+sum(is.na(logdeaths_health_full))
+
+# Prepare LOG DEATHS base for LASSO (without NAs)
+logdeaths_health.NA <- colSums(is.na(logdeaths_health_full))
+logdeaths_health.NA.index <- which(logdeaths_health.NA != 0, arr.ind= TRUE)
+logdeaths_health <- logdeaths_health_full[,-logdeaths_health.NA.index]
+sum(is.na(logdeaths_health))
+
+```
+
+# Regressions
+
+## Deaths: linear model (all in)
+
+```{r}
+# Run deaths vs health regression (linear model)
+deaths_health_fit0 <- lm(deaths_per100K~., deaths_health_full)
+summary(deaths_health_fit0)
+
+# Run log deaths vs health regression (linear model)
+logdeaths_health_fit0 <- lm(logdeaths_per100K~., logdeaths_health_full)
+summary(logdeaths_health_fit0)
+```
+
+## Cases: linear model (all in)
+
+```{r}
+# Run cases vs health regression (linear model)
+cases_health_fit0 <- lm(cases_per100K~., cases_health_full)
+summary(cases_health_fit0)
+
+# Run log cases vs health regression (linear model)
+logcases_health_fit0 <- lm(logcases_per100K~., logcases_health_full)
+summary(logcases_health_fit0)
+
+```
+
+## Deaths: LASSO and fine-tuning
+
+```{r}
+## Run LASSO of DEATHS vs health variables
+
+#Step 1: Prepare design matrix
+Y_deaths <- deaths_health[,1]
+X_health <- model.matrix(deaths_per100K~., data = deaths_health)
+
+#Step 2: Find x's output from LASSO with min cross-validation error
+set.seed(10)  # to control the ramdomness in K folds 
+
+deaths_health_fit.cv <- cv.glmnet(X_health, Y_deaths, alpha=1, nfolds=10, intercept = T, 
+                                  penalty.factor = c(rep(0,27), rep(1, ncol(X_health)-27))) 
+
+plot(deaths_health_fit.cv)
+
+health_coef.min <- coef(deaths_health_fit.cv, s="lambda.min")  #s=c("lambda.1se","lambda.min") or lambda value
+health_coef.min <- health_coef.min[which(health_coef.min !=0),]   # get the non-zero coefficients
+health_var.min <- rownames(as.matrix(health_coef.min))[-1] # output the names  dim(as.matrix(coef.min))
+
+#health_coef.min
+health_var.min
+
+```
+
+```{r}
+## Screen variables to avoid colinearity
+#which( var.min == "beds.priv.per100Khab.2021_specialty.total", arr.ind = TRUE)
+health_var.min_final <- health_var.min
+dim(as.matrix(health_var.min_final))
+
+```
+
+```{r}
+## Fine tuning
+
+# Calculate number of levels of forced variable (states)
+forced_size <- deaths_health %>% 
+  select(state_name) %>%
+    distinct() %>%
+      dim()
+forced_size <- forced_size[1]
+
+# Calculate number of variables chosen in LASSO
+max_var<-dim(as.matrix(health_var.min_final))[1] 
+
+deaths_health.sub <- deaths_health %>%
+  select(state_name, health_var.min_final[forced_size:max_var], deaths_per100K)
+
+X_health.sub <- model.matrix(deaths_per100K~., data = deaths_health.sub)
+
+deaths_health.fine_tuning <- regsubsets(deaths_per100K ~., data = deaths_health.sub, 
+                                        nvmax=max_var, force.in = c(1:(forced_size-1)), method="exhaustive", really.big = TRUE)
+ 
+summary(deaths_health.fine_tuning)
+plot(summary(deaths_health.fine_tuning)$cp) 
+```
+
+```{r}
+# Select number of (not-forced) variables using Cp
+deaths_health.final.summary<- summary(deaths_health.fine_tuning)
+opt.size <- 15 #selected using elbow rule
+
+# Select variables
+deaths_health.final.var.1 <- deaths_health.final.summary$which
+deaths_health.final.var <- colnames(deaths_health.final.var.1)[deaths_health.final.var.1[opt.size, ]][-1] #take the intercept put
+deaths_health.final.var <- deaths_health.final.var[-c(1:(forced_size-1))]
+deaths_health.final.var
+
+# Final model
+deaths_health.final.fit <- lm(deaths_per100K ~., 
+                              deaths_health.sub[, c("deaths_per100K", "state_name", deaths_health.final.var)])
+summary(deaths_health.final.fit)
+
+plot(deaths_health.final.fit, 1)
+plot(deaths_health.final.fit, 2)
+```
+
+```{r}
+deaths_health.final.predicted <- predict(deaths_health.final.fit)
+deaths_health.final.stdres <- rstandard(deaths_health.final.fit)
+
+plot(Y_deaths,deaths_health.final.predicted)
+
+# Save data
+deaths_health_results <- data.frame(covid_cumulative[,c("city_code","deaths_per100K")], 
+                                    deaths_health.final.predicted, deaths_health.final.stdres) 
+deaths_health_results <- deaths_health_results %>%
+  left_join(city, by = "city_code")
+
+deaths_health_results <- deaths_health_results[,c(1,7,6,2,3,4)]
+str(deaths_health_results)
+
+deaths_health_results %>%
+  write.csv("results/db_results_deaths_health.csv",row.names=FALSE)
+```
+
+```{r}
+# Select variables MANUALLY
+
+deaths_health_manual <- deaths_health %>% 
+   select(deaths_per100K, 
+          state_name,
+          hosp_beds.2021.per100Khab,
+          hosp_beds.growth.2020to21,
+          beds.total.per100Khab.2021_ICU.adult1,
+          beds.total.per100Khab.2021_specialty.total,
+          #beds.total.growth20to21_ICU.adult1,
+          beds.total.growth20to21_ICU.adult3,
+          #beds.priv.growth20to21_ICU.adult1,
+          beds.priv.growth20to21_ICU.adult3,  
+          beds.publ.per100Khab.2021_specialty.total,
+          #oxygen.usedper100K_03.2020,
+          #infecto_all.2020.totalper100K,
+          nurses_prof.2020.totalper100K,
+          deaths_diabetes.2019per100K,
+          deaths_circulatory.2019per100K,
+          #deaths_hypertensive.2019per100K,
+          deaths_respiratory.2019per100K,
+          lives_03.20.per100k.total,
+          lives_per100k.growth.total)
+  
+# Run deaths vs health regression (linear model) - fit MANUAL
+deaths_health_fit1 <- lm(deaths_per100K~., deaths_health_manual)
+summary(deaths_health_fit1)
+  
+```
+
+## log Deaths: LASSO and fine-tuning
+
+```{r}
+## Run LASSO of log DEATHS vs health variables
+
+#Step 1: Prepare design matrix
+Y_logdeaths <- logdeaths_health[,1]
+X_loghealth <- model.matrix(logdeaths_per100K~., data = logdeaths_health)
+
+#Step 2: Find x's output from LASSO with min cross-validation error
+set.seed(10)  # to control the ramdomness in K folds 
+
+logdeaths_health_fit.cv <- cv.glmnet(X_loghealth, Y_logdeaths, alpha=1, nfolds=10, intercept = T, 
+                                  penalty.factor = c(rep(0,27), rep(1, ncol(X_loghealth)-27))) 
+
+plot(logdeaths_health_fit.cv)
+
+loghealth.coef.min <- coef(logdeaths_health_fit.cv, s="lambda.min")  #s=c("lambda.1se","lambda.min") or lambda value
+loghealth.coef.min <- loghealth.coef.min[which(loghealth.coef.min !=0),]   # get the non-zero coefficients
+loghealth.var.min <- rownames(as.matrix(loghealth.coef.min))[-1] # output the names  dim(as.matrix(coef.min))
+
+#loghealth.coef.min
+loghealth.var.min
+
+```
+
+```{r}
+## Screen variables to avoid colinearity
+#which( var.min == "beds.priv.per100Khab.2021_specialty.total", arr.ind = TRUE)
+loghealth.var.min_final <- loghealth.var.min
+dim(as.matrix(loghealth.var.min_final))
+
+```
+
+```{r}
+## Fine tuning
+
+# Calculate number of levels of forced variable (states)
+forced_size <- logdeaths_health %>% 
+  select(state_name) %>%
+    distinct() %>%
+      dim()
+forced_size <- forced_size[1]
+
+# Calculate number of variables chosen in LASSO
+max_var<-dim(as.matrix(loghealth.var.min_final))[1] 
+
+logdeaths_health.sub <- logdeaths_health %>%
+  select(state_name, loghealth.var.min_final[forced_size:max_var], logdeaths_per100K)
+
+X_loghealth.sub <- model.matrix(logdeaths_per100K~., data = logdeaths_health.sub)
+
+logdeaths_health.fine_tuning <- regsubsets(logdeaths_per100K ~., data = logdeaths_health.sub, 
+                                        nvmax=max_var, force.in = c(1:(forced_size-1)), method="forward")
+ 
+summary(logdeaths_health.fine_tuning)
+plot(summary(logdeaths_health.fine_tuning)$cp) 
+```
+
+```{r}
+# Select number of (not-forced) variables using Cp
+logdeaths_health.final.summary<- summary(logdeaths_health.fine_tuning)
+opt.size <- 20 #selected using elbow rule
+
+# Select variables
+logdeaths_health.final.var.1 <- logdeaths_health.final.summary$which
+logdeaths_health.final.var <- colnames(logdeaths_health.final.var.1)[logdeaths_health.final.var.1[opt.size, ]][-1] #take the intercept put
+logdeaths_health.final.var <- logdeaths_health.final.var[-c(1:(forced_size-1))]
+logdeaths_health.final.var
+
+# Final model
+logdeaths_health.final.fit <- lm(logdeaths_per100K ~., 
+                              logdeaths_health.sub[, c("logdeaths_per100K", "state_name", logdeaths_health.final.var)])
+summary(logdeaths_health.final.fit)
+
+plot(logdeaths_health.final.fit, 1)
+plot(logdeaths_health.final.fit, 2)
+
+```
+
+
+[end]
+

@@ -1,0 +1,181 @@
+---
+title: "Final Project - Regression"
+author: "Alexandre, Isabella, Lu Lu"
+date: "May/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+```
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+**Objective: run regression analysis of covid cumulative cases ans deaths vs independent variables**
+
+# Data preparation
+
+## Inputs: Covid deaths and cases vs HEALTH variables
+
+```{r}
+# Read COVID data
+covid_cumulative <- read.csv("data_cleaned/db_covid_cumulative.csv") %>%
+  arrange(city_code)
+str(covid_cumulative)
+
+# Read HEALTH database
+health <- read.csv("data_joined/db_health.csv") %>%
+  arrange(city_code)
+str(health)
+
+# Read STATE variable
+state <- read.csv("data_cleaned/db_geo_state.csv") %>%
+  arrange(city_code)
+state <- state %>%
+  mutate(state_name = as.factor(state)) %>%
+  select(-state)
+str(state)
+```
+
+## Preparation: format databases to run the regressions
+
+```{r}
+# Prepare cases base for regression (full = might have NAs)
+cases_health_full <- covid_cumulative %>%
+  select(city_code, cases_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(cases_health_full)
+sum(is.na(cases_health_full))
+
+# Prepare cases base for LASSO (without NAs)
+cases_health.NA <- colSums(is.na(cases_health_full))
+cases_health.NA.index <- which(cases_health.NA != 0, arr.ind= TRUE)
+cases_health <- cases_health_full[,-cases_health.NA.index]
+sum(is.na(cases_health))
+  
+# Prepare deaths base for regression
+deaths_health_full <- covid_cumulative %>%
+  select(city_code, deaths_per100K) %>%
+    left_join(state, by = "city_code") %>%
+      left_join(health, by = "city_code") %>%
+        select(-city_code)
+#str(deaths_health_full)
+sum(is.na(deaths_health_full))
+
+# Prepare deaths base for LASSO (without NAs)
+deaths_health.NA <- colSums(is.na(deaths_health_full))
+deaths_health.NA.index <- which(deaths_health.NA != 0, arr.ind= TRUE)
+deaths_health <- deaths_health_full[,-deaths_health.NA.index]
+sum(is.na(deaths_health))
+
+```
+
+# Regressions
+
+## Deaths: linear model (all in)
+
+```{r}
+# Run deaths vs health regression (linear model)
+deaths_health_fit0 <- lm(deaths_per100K~., deaths_health_full)
+summary(deaths_health_fit0)
+```
+
+## Cases: linear model (all in)
+
+```{r}
+# Run cases vs health regression (linear model)
+cases_health_fit0 <- lm(cases_per100K~., cases_health_full)
+summary(cases_health_fit0)
+```
+
+## Deaths: LASSO and fine-tuning
+
+```{r}
+## Run LASSO of DEATHS vs health variables
+
+#Step 1: Prepare design matrix
+Y_deaths <- deaths_health[,1]
+X_health <- model.matrix(deaths_per100K~., data = deaths_health)
+
+#Step 2: Find x's output from LASSO with min cross-validation error
+set.seed(10)  # to control the ramdomness in K folds 
+
+deaths_health_fit.cv <- cv.glmnet(X_health, Y_deaths, alpha=1, nfolds=10, intercept = T, 
+                                  penalty.factor = c(rep(0,27), rep(1, ncol(X_health)-27))) 
+
+plot(deaths_health_fit.cv)
+
+coef.min <- coef(deaths_health_fit.cv, s="lambda.min")  #s=c("lambda.1se","lambda.min") or lambda value
+coef.min <- coef.min[which(coef.min !=0),]   # get the non-zero coefficients
+var.min <- rownames(as.matrix(coef.min))[-1] # output the names  dim(as.matrix(coef.min))
+
+coef.min
+var.min
+
+```
+
+```{r}
+## Screen variables to avoid colinearity
+which( var.min == "beds.priv.per100Khab.2021_specialty.total", arr.ind = TRUE)
+var.min_final <- var.min
+dim(as.matrix(var.min_final))
+
+```
+
+```{r}
+## Fine tuning
+
+# Calculate number of levels of forced variable (states)
+forced_size <- deaths_health %>% 
+  select(state_name) %>%
+    distinct() %>%
+      dim()
+forced_size <- forced_size[1]
+
+# Calculate number of variables chosen in LASSO
+max_var<-dim(as.matrix(var.min_final))[1] 
+
+deaths_health.sub <- deaths_health %>%
+  select(state_name, var.min_final[forced_size:max_var], deaths_per100K)
+
+X_health.sub <- model.matrix(deaths_per100K~., data = deaths_health.sub)
+
+deaths_health.fine_tuning <- regsubsets(deaths_per100K ~., data = deaths_health.sub, 
+                                        nvmax=max_var, force.in = c(1:(forced_size-1)), method="exhaustive", really.big = TRUE)
+ 
+summary(deaths_health.fine_tuning)
+plot(summary(deaths_health.fine_tuning)$cp) 
+```
+
+```{r}
+# Select number of (not-forced) variables using Cp
+deaths_health.final.summary<- summary(deaths_health.fine_tuning)
+opt.size <- 15 #selected using elbow rule
+
+# Select variables
+deaths_health.final.var.1 <- deaths_health.final.summary$which
+deaths_health.final.var <- colnames(deaths_health.final.var.1)[deaths_health.final.var.1[opt.size, ]][-1] #take the intercept put
+deaths_health.final.var <- deaths_health.final.var[-c(1:(forced_size-1))]
+deaths_health.final.var
+
+# Final model
+deaths_health.final.fit <- lm(deaths_per100K ~., deaths_health.sub[, c("deaths_per100K", "state_name", deaths_health.final.var)])
+summary(deaths_health.final.fit)
+
+```
+
+
+
+[end]
+

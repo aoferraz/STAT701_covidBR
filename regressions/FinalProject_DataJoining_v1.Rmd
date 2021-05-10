@@ -1,0 +1,72 @@
+---
+title: "Final Project - Data Joining"
+author: "Alexandre, Isabella, Lu Lu"
+date: "May/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 0, digits = 3)
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(bestglm, glmnet, leaps, car, tidyverse, pROC, caret) # add the packages needed
+library(xtable)
+library(dplyr)
+library(readxl)
+```
+
+```{r, echo=FALSE}
+#clear variables
+rm(list=ls())
+```
+
+**Objective: join databases according the following data categories**
+
+Data categories
+
+1, Geographic
+2. Population
+3. Economic
+4. Health
+5. Politics
+6. Covid
+
+# Health data
+
+```{r}
+## Read HEALTH cleaned csv files
+hosp_beds <- read.csv("data_cleaned/db_health_hosp_beds.csv")
+spec_beds <- read.csv("data_cleaned/db_health_spec_beds.csv")
+ventilators <- read.csv("data_cleaned/db_health_ventilators.csv")
+oxygen <- read.csv("data_cleaned/db_health_oxygen.csv")
+doctors <- read.csv("data_cleaned/db_health_doctors.csv")
+nurses <- read.csv("data_cleaned/db_health_nurses.csv")
+death_conditions <- read.csv("data_cleaned/db_health_deaths_conditions.csv")
+lives <- read.csv("data_cleaned/db_health_lives.csv")
+```
+
+```{r}
+## Join HEALTH tables into one database
+db_health <- hosp_beds %>% 
+  left_join(spec_beds, by = "city_code") %>%
+  left_join(ventilators, by = "city_code") %>%
+  left_join(oxygen, by = "city_code") %>%
+  left_join(doctors, by = "city_code") %>%
+  left_join(nurses, by = "city_code") %>%
+  left_join(death_conditions, by = "city_code") %>%
+  left_join(lives, by = "city_code")
+
+#str(db_health)
+sum(is.na(db_health))
+colSums(is.na(db_health)) ## 4 variables with NaN, which calculate the growth of percentage of equipment in use of total (ventilators and oxygen variables) 
+```
+
+```{r}
+## Save csv file
+db_health %>%
+  write.csv("data_joined/db_health.csv",row.names=FALSE)
+```
+
+
+[end]
+
